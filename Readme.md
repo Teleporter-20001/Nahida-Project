@@ -47,4 +47,4 @@ Nahida Project 是一个基于 Pygame 的射击游戏项目，玩家需要控制
 
 ## 许可证
 
-该项目使用 MIT 许可证。详情请参阅 [LICENSE](LICENSE) 文件。
+该项目使用 MIT 许可证。详情请参阅 [LICENSE](LICENSE) 文件。**不允许商用。**
