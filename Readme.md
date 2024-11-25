@@ -25,7 +25,7 @@ Nahida Project 是一个基于 Pygame 的射击游戏项目，玩家需要控制
 1. 克隆项目到本地：
     ```sh
     git clone git@github.com:Teleporter-20001/Nahida-Project.git
-    cd <Nahida-Project>
+    cd Nahida-Project
     ```
 
 2. 安装依赖：
