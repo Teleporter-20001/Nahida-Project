@@ -1,3 +1,6 @@
+# This project is licensed under the MIT License (Non-Commercial Use Only).
+# Please see the license file in this source distribution for full license terms.
+
 from typing import Any
 import pygame
 from Settings import *

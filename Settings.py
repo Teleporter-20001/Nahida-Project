@@ -1,3 +1,6 @@
+# This project is licensed under the MIT License (Non-Commercial Use Only).
+# Please see the license file in this source distribution for full license terms.
+
 import pygame
 
 VERSION = "Nahida project 6.0 by zhz"
