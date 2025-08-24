@@ -1,0 +1,5 @@
+AI_data/*
+output/*
+__pycache__/*
+.*
+!.gitignore
