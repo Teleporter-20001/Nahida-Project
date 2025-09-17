@@ -1,5 +1,9 @@
 AI_data/*
 output/*
+app/resources/*
+
 __pycache__/*
+**/*.pyc
+
 .*
 !.gitignore
