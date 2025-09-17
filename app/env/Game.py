@@ -30,11 +30,16 @@ class Game:
         total_reward = 0.0
 
         for step in range(max_steps):
-            # handle quit events so window can be closed
+            # handle events and forward to environment (so env can process timers)
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     self.env.close()
                     sys.exit()
+                # forward other events to environment for handling (e.g., timed shooting)
+                try:
+                    self.env.handle_event(event)
+                except AttributeError:
+                    pass
 
             action = agent.decide_action(state)
             next_state, reward, done, info = self.env.step(action)

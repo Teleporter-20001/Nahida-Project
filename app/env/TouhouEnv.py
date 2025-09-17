@@ -3,6 +3,7 @@ import sys
 import pygame
 
 from app.characters.Nahida import Nahida
+from app.characters.OurBullet import OurBullet
 from app.common.Settings import Settings
 from app.Agent.DataStructure import State, Action
 
@@ -14,6 +15,8 @@ class TouhouEnv:
     Observation is provided via `State` instances. Actions are the `Action` enum.
     """
 
+    PLAYER_SHOOT_EVENT = pygame.USEREVENT + 1
+    
     def __init__(self, settings=Settings):
         pygame.init()
         self.settings = settings
@@ -22,7 +25,7 @@ class TouhouEnv:
         pygame.display.set_caption('TouhouEnv')
 
         # sprite group holding the player (environment owns entities)
-        self.lives = pygame.sprite.Group()
+        self.players = pygame.sprite.Group()
         self.player = Nahida(
             int(settings.window_width * .5),
             int(settings.window_height * .75),
@@ -30,7 +33,9 @@ class TouhouEnv:
             os.path.join('resources', 'nahida_2.png'),
             target_size=(80, 130)
         )
-        self.lives.add(self.player)
+        self.players.add(self.player)
+        # sprite group holding player's bullets
+        self.our_bullets: pygame.sprite.Group = pygame.sprite.Group()
 
         # RL-style metadata
         self.action_space = list(Action)
@@ -40,6 +45,7 @@ class TouhouEnv:
         }
 
         self._terminated = False
+        # custom pygame event for timed player shooting
 
     def _get_observation(self) -> State:
         obs = {
@@ -57,7 +63,10 @@ class TouhouEnv:
         self.player.rect.centerx = int(self.settings.window_width * .5)
         self.player.rect.centery = int(self.settings.window_height * .75)
         self._terminated = False
+        # start automatic shooting timer (300 ms)
+        self.start_shoot_timer(130)
         return self._get_observation()
+
 
     def step(self, action: Action):
         """Apply action (an Action enum) and step environment.
@@ -72,7 +81,8 @@ class TouhouEnv:
             self.player.set_action(action)
 
         # update groups
-        self.lives.update()
+        self.players.update()
+        self.our_bullets.update()
 
         # placeholder reward: small negative step penalty to encourage efficiency
         reward = -0.01
@@ -84,10 +94,45 @@ class TouhouEnv:
     def render(self):
         """Render one frame to the screen."""
         self.screen.fill(self.settings.window_background_color)
-        self.lives.draw(self.screen)
+        self.players.draw(self.screen)
+        self.our_bullets.draw(self.screen)
         pygame.display.update()
         self.clock.tick(self.settings.FPS)
 
     def close(self):
+        # stop timers before quitting
+        try:
+            self.stop_shoot_timer()
+        except Exception:
+            pass
         pygame.quit()
         # do not call sys.exit() here; let caller decide
+
+    # -----------------------------------
+
+    def handle_event(self, event):
+        """Handle pygame events delegated from the main loop. If a shoot event is received,
+        spawn a bullet via _playerShoot.
+        """
+        if event.type == TouhouEnv.PLAYER_SHOOT_EVENT:
+            self._playerShoot()
+            
+    def _playerShoot(self):
+        self.our_bullets.add(OurBullet(
+            self.player.posx,
+            self.player.posy,
+            10,
+            os.path.join('resources', 'butterfly.png'),
+            0,
+            -1000,
+            (20, 20)
+        ))
+        
+    def start_shoot_timer(self, interval_ms: int = 300):
+        """Start a pygame timer that will generate events every interval_ms milliseconds."""
+        pygame.time.set_timer(TouhouEnv.PLAYER_SHOOT_EVENT, int(interval_ms))
+
+    def stop_shoot_timer(self):
+        """Stop the shooting timer."""
+        pygame.time.set_timer(TouhouEnv.PLAYER_SHOOT_EVENT, 0)
+
