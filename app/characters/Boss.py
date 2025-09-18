@@ -27,6 +27,7 @@ class Boss(BaseChar):
         super().__init__(x, y, radius, img_path, vx, vy, target_size, no_out=True)
         self.maxy = int(Settings.window_height / 2.5)
         self.health: int = health
+        self.max_health: int = health
         self.direction = random.random() * 2 * pi
         
     @property

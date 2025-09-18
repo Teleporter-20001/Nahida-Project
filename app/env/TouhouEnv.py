@@ -3,6 +3,7 @@ import sys
 import pygame
 from math import sin, cos, pi
 import numpy as np
+import heapq
 
 from app.characters.Nahida import Nahida
 from app.characters.Boss import Boss
@@ -65,12 +66,48 @@ class TouhouEnv:
         # custom pygame event for timed player shooting
 
     def _get_observation(self) -> State:
+        
+        # Find nearest k enemy bullets to the player and return their features
+        k = 10
+        px = self.player.posx
+        py = self.player.posy
+
+        bullets = []  # list of (dist_sq, x, y, vx, vy, radius)
+        for b in self.enemy_bullets:
+            try:
+                bx = getattr(b, 'posx', b.rect.centerx)
+                by = getattr(b, 'posy', b.rect.centery)
+                bvx = getattr(b, 'vx', 0.0)
+                bvy = getattr(b, 'vy', 0.0)
+                br = getattr(b, 'radius', max(getattr(b, 'rect', pygame.Rect(0,0,1,1)).width, getattr(b, 'rect', pygame.Rect(0,0,1,1)).height) / 2.0)
+            except Exception as e:
+                print(f'Warning: Error getting bullet attributes: {e}')
+                continue
+            dx = bx - px
+            dy = by - py
+            dist_sq = dx * dx + dy * dy
+            bullets.append((dist_sq, float(dx), float(dy), float(bvx), float(bvy), float(br)))
+
+        # take k nearest by distance using a heap for O(n log k) performance
+        if len(bullets) <= k:
+            nearest = bullets
+        else:
+            nearest = heapq.nsmallest(k, bullets, key=lambda x: x[0])
+
+        # build numpy array (k,5) with rows [x,y,vx,vy,radius], pad with zeros if fewer than k
+        arr = np.zeros((k, 5), dtype=np.float32)
+        for i, item in enumerate(nearest):
+            _, bx, by, bvx, bvy, br = item
+            arr[i, :] = (bx, by, bvx, bvy, br)
+
         obs = {
-            'player_x': self.player.rect.centerx,
-            'player_y': self.player.rect.centery,
-            'player_rect': self.player.rect.copy(),
-            'screen_width': self.settings.window_width,
-            'screen_height': self.settings.window_height,
+            'player_x': self.player.posx, 
+            'player_y': self.player.posy,
+            'boss_from_player_x': self.boss.posx - self.player.posx,
+            'boss_from_player_y': self.boss.posy - self.player.posy,
+            'boss_velx': self.boss.vx,
+            'boss_vely': self.boss.vy,
+            'nearest_bullets': arr, # shape (k,5) array of nearest enemy bullets, each row is (x, y(relative to player), vx, vy, radius)
         }
         return State(observation=obs)
 
@@ -196,6 +233,29 @@ class TouhouEnv:
         self.our_bullets.draw(self.screen)
         self.enemies.draw(self.screen)
         self.enemy_bullets.draw(self.screen)
+        # draw boss health bar at the top (left-aligned) after sprites so the empty area is transparent
+        try:
+            boss = self.boss
+            current_hp = float(getattr(boss, 'health', 0))
+            # use explicit max_health field as requested
+            max_hp = float(getattr(boss, 'max_health', 1.0))
+            if max_hp <= 0:
+                max_hp = 1.0
+            hp_ratio = max(0.0, min(1.0, current_hp / max_hp))
+
+            bar_height = 18
+            padding = 4
+            bar_y = padding
+            bar_x = 0
+            bar_full_width = self.settings.window_width
+            # filled portion only; empty area is left transparent to show game beneath
+            filled_width = int(bar_full_width * hp_ratio)
+            if filled_width > 0:
+                pygame.draw.rect(self.screen, (200, 30, 30), (bar_x, bar_y, filled_width, bar_height))
+            # border around full width
+            pygame.draw.rect(self.screen, (0, 0, 0), (bar_x, bar_y, bar_full_width, bar_height), 2)
+        except Exception:
+            pass
         pygame.display.update()
         self.clock.tick(self.settings.FPS)
 
