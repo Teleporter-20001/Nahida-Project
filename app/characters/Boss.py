@@ -16,6 +16,7 @@ class Boss(BaseChar):
             y: float,
             radius: int,
             img_path: str,
+            health: int = 250,
             vx: float=0,
             vy: float=0,
             target_size: tuple[int, int]=(-1, -1),
@@ -25,7 +26,7 @@ class Boss(BaseChar):
         """
         super().__init__(x, y, radius, img_path, vx, vy, target_size, no_out=True)
         self.maxy = int(Settings.window_height / 2.5)
-        self.health: int = 250
+        self.health: int = health
         self.direction = random.random() * 2 * pi
         
     @property

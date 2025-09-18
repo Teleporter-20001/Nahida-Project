@@ -35,7 +35,7 @@ class TouhouEnv:
         self.player = Nahida(
             int(settings.window_width * .5),
             int(settings.window_height * .75),
-            10,
+            8,
             os.path.join('resources', 'nahida_2.png'),
             target_size=(80, 130)
         )
@@ -48,6 +48,7 @@ class TouhouEnv:
             self.settings.window_height / 5,
             50,
             os.path.join('resources', 'boss.png'),
+            health=250, 
             target_size=(100, 100)
         )
         self.enemies.add(self.boss) # type: ignore
@@ -105,11 +106,53 @@ class TouhouEnv:
         self.enemy_bullets.update()
 
         # placeholder reward: small negative step penalty to encourage efficiency
-        reward = -0.01
-
+        reward = 0.01
         done = False
 
+        # player bullets vs enemies collision: circle-vs-circle using radius fields
         # collision detection: use a simple circle (player center, radius from BaseChar) vs bullet centers
+        try:
+            # check our bullets against enemies
+            for bullet in list(self.our_bullets):
+                try:
+                    bx = bullet.rect.centerx
+                    by = bullet.rect.centery
+                except Exception:
+                    continue
+                br = getattr(bullet, 'radius', max(bullet.rect.width, bullet.rect.height) / 2.0)
+                for enemy in list(self.enemies):
+                    try:
+                        ex = enemy.rect.centerx
+                        ey = enemy.rect.centery
+                    except Exception:
+                        continue
+                    er = getattr(enemy, 'radius', getattr(enemy, '_radius', 0))
+                    dx = bx - ex
+                    dy = by - ey
+                    if dx * dx + dy * dy <= (br + er) ** 2:
+                        try:
+                            bullet.kill()
+                        except Exception:
+                            pass
+                        try:
+                            if hasattr(enemy, 'health'):
+                                enemy.health -= 1
+                                reward += 0.1
+                                if getattr(enemy, 'health', 0) <= 0:
+                                    enemy.kill()
+                                    reward += 10.0
+                        except Exception:
+                            pass
+                        # bullet hit an enemy; move to next bullet
+                        break
+        except Exception as e:
+            print(f'Error in bullet-vs-enemy collision: {e}')
+            
+        if not self.boss.alive:
+            reward += 1000.0
+            self._terminated = True
+            done = True
+        
         try:
             px = self.player.posx
             py = self.player.posy
