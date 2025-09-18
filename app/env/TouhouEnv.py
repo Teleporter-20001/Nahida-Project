@@ -1,4 +1,5 @@
 import os
+import random
 import sys
 import pygame
 from math import sin, cos, pi
@@ -28,7 +29,11 @@ class TouhouEnv:
         pygame.init()
         self.settings = settings
         self.clock = pygame.time.Clock()
+        # request window position (SDL reads this env var when creating the window)
+        # os.environ['SDL_VIDEO_WINDOW_POS'] = "1600,800"
         self.screen = pygame.display.set_mode((settings.window_width, settings.window_height))
+        # optional: remove env var so it doesn't affect later windows
+        # os.environ.pop('SDL_VIDEO_WINDOW_POS', None)
         pygame.display.set_caption('TouhouEnv')
 
         # sprite group holding the player (environment owns entities)
@@ -58,9 +63,9 @@ class TouhouEnv:
         # RL-style metadata
         self.action_space = list(Action)
         # observation_space is informal here (no gym dependency)
-        self.observation_space = {
-            'player_pos': (settings.window_width, settings.window_height),
-        }
+        # self.observation_space = {
+        #     'player_pos': (settings.window_width, settings.window_height),
+        # }
 
         self._terminated = False
         # custom pygame event for timed player shooting
@@ -97,8 +102,8 @@ class TouhouEnv:
         # build numpy array (k,5) with rows [x,y,vx,vy,radius], pad with zeros if fewer than k
         arr = np.zeros((k, 5), dtype=np.float32)
         for i, item in enumerate(nearest):
-            _, bx, by, bvx, bvy, br = item
-            arr[i, :] = (bx, by, bvx, bvy, br)
+            _, dx, dy, bvx, bvy, br = item
+            arr[i, :] = (dx, dy, bvx, bvy, br)
 
         obs = {
             'player_x': self.player.posx, 
@@ -114,13 +119,25 @@ class TouhouEnv:
     def reset(self) -> State:
         """Reset environment to initial state and return initial observation (State)."""
         # reset player position to bottom center
-        self.player.rect.centerx = int(self.settings.window_width * .5)
-        self.player.rect.centery = int(self.settings.window_height * .75)
+        self.player._posx = int(self.settings.window_width * .5)
+        self.player._posy = int(self.settings.window_height * .75)
+
+        self.boss._posx = int(self.settings.window_width / 4)
+        # self.boss._posx = int(random.randint(self.boss.rect.width/2 + 5, self.settings.window_width - self.boss.rect.width/2 - 5))
+        self.boss._posy = int(self.settings.window_height / 5)
+        self.boss.health = self.boss.max_health
+
+        self.our_bullets.empty()
+        self.enemy_bullets.empty()
+
         self._terminated = False
-        # start automatic shooting timer (300 ms)
+        # restart automatic timer
+        self.stop_shoot_timer()
+        self.stop_boss_change_dir_timer()
+        self.stop_boss_spray_timer()
         self.start_shoot_timer(130)
         self.start_boss_change_dir_timer(2000)
-        self.start_boss_spray_timer(700)
+        self.start_boss_spray_timer(900)
         return self._get_observation()
 
 
@@ -142,9 +159,20 @@ class TouhouEnv:
         self.enemies.update()
         self.enemy_bullets.update()
 
-        # placeholder reward: small negative step penalty to encourage efficiency
-        reward = 0.01
+        # placeholder reward: small positive reward to encourage alive
+        reward = 3./40
         done = False
+        
+        # punish player going to edge
+        # BORDER_BUFFER = 75
+        # if self.player.posx < self.player.minx + BORDER_BUFFER:
+        #     reward += (self.player.posx - self.player.minx) / BORDER_BUFFER * -0.03
+        # if self.player.posx > self.player.maxx - BORDER_BUFFER:
+        #     reward += (self.player.maxx - self.player.posx) / BORDER_BUFFER * -0.03
+        # if self.player.posy < self.player.miny + BORDER_BUFFER:
+        #     reward += (self.player.posy - self.player.miny) / BORDER_BUFFER * -0.03
+        # if self.player.posy > self.player.maxy - BORDER_BUFFER:
+        #     reward += (self.player.maxy - self.player.posy) / BORDER_BUFFER * -0.03
 
         # player bullets vs enemies collision: circle-vs-circle using radius fields
         # collision detection: use a simple circle (player center, radius from BaseChar) vs bullet centers
@@ -174,10 +202,10 @@ class TouhouEnv:
                         try:
                             if hasattr(enemy, 'health'):
                                 enemy.health -= 1
-                                reward += 0.1
-                                if getattr(enemy, 'health', 0) <= 0:
-                                    enemy.kill()
-                                    reward += 10.0
+                                reward += 0.2
+                                # if getattr(enemy, 'health', 0) <= 0:
+                                    # enemy.kill()
+                                    # reward += 10.0
                         except Exception:
                             pass
                         # bullet hit an enemy; move to next bullet
@@ -186,14 +214,18 @@ class TouhouEnv:
             print(f'Error in bullet-vs-enemy collision: {e}')
             
         if not self.boss.alive:
-            reward += 1000.0
+            reward += 50.0
             self._terminated = True
             done = True
-        
+
+        # player vs enemy bullets collision: circle-vs-circle using radius fields
+        min_dist = np.infty
         try:
             px = self.player.posx
             py = self.player.posy
             for bullet in self.enemy_bullets:
+                if done:
+                    break
                 # try to get bullet center; fallback to rect if attribute missing
                 try:
                     bx = bullet.rect.centerx
@@ -208,11 +240,13 @@ class TouhouEnv:
                 dx = px - bx
                 dy = py - by
                 dist_sq = dx * dx + dy * dy
+                if np.sqrt(dist_sq) < min_dist:
+                    min_dist = np.sqrt(dist_sq)
                 # collision if distance between centers <= (player radius + bullet radius)
                 if dist_sq <= (self.player.radius + br) ** 2:
-                    reward += -1000
+                    reward += -30.0
                     done = True
-                    break
+            # reward += -3. / min_dist
         except Exception as e:
             # defensive: if sprites/groups aren't set up as expected, don't crash the env
             print(f'Error in collision detection: {e}')
@@ -299,7 +333,7 @@ class TouhouEnv:
             10,
             os.path.join('resources', 'butterfly.png'),
             0,
-            -1000,
+            -1500,
             (20, 20)
         ))
         

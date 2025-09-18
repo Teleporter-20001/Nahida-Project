@@ -3,7 +3,7 @@ from math import *
 
 class SprayBullet(BaseEnemyBullet):
     
-    ORIGIN_SPEED = 200
+    ORIGIN_SPEED = 240
 
     def __init__(self, x: float, y: float, radius: int, img_path: str, theta: float, vx: float = 0, vy: float = 0, target_size: tuple[int, int] = (-1, -1)):
         r = 10

@@ -8,7 +8,7 @@ from app.characters.BaseChar import BaseChar
 
 class Nahida(BaseChar):
 
-    ORIGIN_SPEED = 100
+    ORIGIN_SPEED = 220
 
     def __init__(
             self,

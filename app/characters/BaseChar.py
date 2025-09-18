@@ -25,10 +25,10 @@ class BaseChar(pygame.sprite.Sprite):
         self._scale = target_size
         self.no_out = no_out
 
-        self.minx = 0
-        self.maxx = Settings.window_width
-        self.miny = 0
-        self.maxy = Settings.window_height
+        self.minx = self.rect.width / 2
+        self.maxx = Settings.window_width - self.rect.width / 2
+        self.miny = self.rect.height / 2 if Settings.window_height > self.rect.height else Settings.window_height / 2
+        self.maxy = Settings.window_height - self.rect.height / 2 if Settings.window_height > self.rect.height else Settings.window_height / 2
 
     @property
     def posx(self):

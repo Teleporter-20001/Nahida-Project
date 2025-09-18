@@ -1,2 +1,6 @@
+torch
 pygame
 numpy
+matplotlib
+pandas
+PyQt5
