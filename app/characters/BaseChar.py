@@ -25,6 +25,11 @@ class BaseChar(pygame.sprite.Sprite):
         self._scale = target_size
         self.no_out = no_out
 
+        self.minx = 0
+        self.maxx = Settings.window_width
+        self.miny = 0
+        self.maxy = Settings.window_height
+
     @property
     def posx(self):
         return self._posx
@@ -44,14 +49,16 @@ class BaseChar(pygame.sprite.Sprite):
 
 
     def update(self):
-        self._posx += self.vx / Settings.FPS
-        if self.no_out and (self.posx < 0 or self.posx > Settings.window_width):
-            self._posx -= self.vx / Settings.FPS
-        self.rect.centerx = round(self._posx)
-        self._posy += self.vy / Settings.FPS
-        if self.no_out and (self.posy < 0 or self.posy > Settings.window_height):
-            self._posy -= self.vy / Settings.FPS
-        self.rect.centery = round(self._posy)
+        delta_posx = self.vx / Settings.FPS
+        tempcenterx = round(self._posx + delta_posx)
+        if not self.no_out or (self.rect.left + delta_posx > self.minx and self.rect.right + delta_posx < self.maxx):
+            self._posx += delta_posx
+            self.rect.centerx = tempcenterx
+        delta_posy = self.vy / Settings.FPS
+        tempcentery = round(self._posy + delta_posy)
+        if not self.no_out or (self.rect.top + delta_posy > self.miny and self.rect.bottom + delta_posy < self.maxy):
+            self._posy += delta_posy
+            self.rect.centery = tempcentery
 
 
     def draw(self, surface: pygame.Surface):

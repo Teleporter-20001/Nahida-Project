@@ -20,7 +20,7 @@ class Game:
         # pygame.init()
         self.env: TouhouEnv = env or TouhouEnv(Settings)
 
-    def run_episode(self, agent: BaseBrain, max_steps: int = 1000, render: bool = True):
+    def run_episode(self, agent: BaseBrain, max_steps: int = 100000, render: bool = True):
         """Run a single episode with the provided agent.
 
         Agent must implement decide_action(state: State) -> Action.

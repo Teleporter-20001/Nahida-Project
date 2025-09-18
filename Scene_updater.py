@@ -25,7 +25,7 @@ class Scene_updater(object):
         
         self.window = window
         self.fps_clock = pygame.time.Clock()
-        self.font = pygame.font.Font("resources/Alibaba_R.ttf", 25)
+        self.font = pygame.font.Font("app/resources/Alibaba_R.ttf", 25)
 
         self.player = player
         self.players = players

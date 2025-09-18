@@ -20,13 +20,9 @@ class Nahida(BaseChar):
             vy: float=0,
             target_size: tuple[int, int]=(-1, -1),
     ):
-        super().__init__(x, y, radius, img_path, vx, vy, target_size)
+        super().__init__(x, y, radius, img_path, vx, vy, target_size, no_out=True)
         self.now_action: Action | None = None
-        # self.brain: BaseBrain = RandomBrain()
-        
 
-    # def choose_action(self, state: State) -> Action: # TODO：从状态到动作的决策过程应该出现在智能体中，但这是环境中的一个部分。要把它移植过去
-    #     return self.brain.decide_action(state)
 
     def set_action(self, action: Action):
         self.now_action = action
