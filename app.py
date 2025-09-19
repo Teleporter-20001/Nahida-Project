@@ -16,6 +16,6 @@ if __name__ == '__main__':
         print(f'reward in one game: {once_reward}')
     else:
         env = TouhouEnv(Settings)
-        trainer = DQNTrainer(SmartBrain1())
+        trainer = DQNTrainer(SmartBrain1(teached=False))
         game: GameTrainer = GameTrainer(env, trainer)
         game.train(30000)

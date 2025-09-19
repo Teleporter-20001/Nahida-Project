@@ -24,3 +24,8 @@ class BaseEnemyBullet(BaseChar):
         self.age += 1
         self.generate_speed()
         super().update()
+        if self.posx < self.minx - self.rect.width \
+            or self.posx > self.maxx + self.rect.width \
+            or self.posy < self.miny - self.rect.height \
+            or self.posy > self.maxy + self.rect.height:    # self go out of field
+            self.kill()

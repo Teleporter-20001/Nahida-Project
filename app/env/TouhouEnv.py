@@ -21,15 +21,28 @@ class TouhouEnv:
     Observation is provided via `State` instances. Actions are the `Action` enum.
     """
 
+    PLAYERDIR_TO_ACTION_DICT = {
+        (-1, -1): Action.LEFTUP,
+        (0, -1): Action.UP,
+        (1, -1): Action.RIGHTUP,
+        (-1, 0): Action.LEFT,
+        (0, 0): Action.NOMOVE,
+        (1, 0): Action.RIGHT,
+        (-1, 1): Action.LEFTDOWN,
+        (0, 1): Action.DOWN,
+        (1, 1): Action.RIGHTDOWN,
+    }
+
     PLAYER_SHOOT_EVENT = pygame.USEREVENT + 1
     BOSS_CHANGE_DIR_EVENT = pygame.USEREVENT + 2
     BOSS_SPRAY_EVENT = pygame.USEREVENT + 3
 
     PLAYER_SHOOT_PERIOD = int(Settings.FPS / 6)    # player shoot once every ? frames
     BOSS_CHANGE_DIR_PERIOD = int(Settings.FPS * 2.5)
-    BOSS_SPRAY_PERIOD = int(Settings.FPS * 0.8)
+    BOSS_SPRAY_PERIOD = int(Settings.FPS * 1.2)
     
     def __init__(self, settings=Settings):
+
         pygame.init()
         self.settings = settings
         self.clock = pygame.time.Clock()
@@ -80,6 +93,15 @@ class TouhouEnv:
         self._terminated = False
         self.worldAge: int = 0
 
+        # for human teaching
+        self.human_action: Action = Action.NOMOVE
+        self.isleft = False # for key state
+        self.isright = False
+        self.isup = False
+        self.isdown = False
+        self.playerdirx = 0 # for player direction
+        self.playerdiry = 0
+
     def _get_observation(self) -> State:
         
         # Find nearest k enemy bullets to the player and return their features
@@ -115,6 +137,9 @@ class TouhouEnv:
             _, dx, dy, bvx, bvy, br = item
             arr[i, :] = (dx, dy, bvx, bvy, br)
 
+        # get human advice:
+        self.human_action = self.PLAYERDIR_TO_ACTION_DICT.get((self.playerdirx, self.playerdiry), Action.RIGHTUP)
+
         obs = {
             'player_x': self.player.posx, 
             'player_y': self.player.posy,
@@ -123,6 +148,7 @@ class TouhouEnv:
             'boss_velx': self.boss.vx,
             'boss_vely': self.boss.vy,
             'nearest_bullets': arr, # shape (k,5) array of nearest enemy bullets, each row is (x, y(relative to player), vx, vy, radius)
+            'human_action': self.human_action,
         }
         return State(observation=obs)
 
@@ -149,6 +175,8 @@ class TouhouEnv:
         # self.start_boss_change_dir_timer(2000)
         # self.start_boss_spray_timer(900)
         self.worldAge = 0
+
+        self.human_action: Action = Action.NOMOVE
 
         return self._get_observation()
 
@@ -184,15 +212,15 @@ class TouhouEnv:
         done = False
         
         # punish player going to edge
-        # BORDER_BUFFER = 75
-        # if self.player.posx < self.player.minx + BORDER_BUFFER:
-        #     reward += (self.player.posx - self.player.minx) / BORDER_BUFFER * -0.03
-        # if self.player.posx > self.player.maxx - BORDER_BUFFER:
-        #     reward += (self.player.maxx - self.player.posx) / BORDER_BUFFER * -0.03
-        # if self.player.posy < self.player.miny + BORDER_BUFFER:
-        #     reward += (self.player.posy - self.player.miny) / BORDER_BUFFER * -0.03
-        # if self.player.posy > self.player.maxy - BORDER_BUFFER:
-        #     reward += (self.player.maxy - self.player.posy) / BORDER_BUFFER * -0.03
+        BORDER_BUFFER = 60
+        if self.player.posx < self.player.minx + BORDER_BUFFER:
+            reward += (1 - (self.player.posx - self.player.minx) / BORDER_BUFFER) * -0.06
+        if self.player.posx > self.player.maxx - BORDER_BUFFER:
+            reward += (1 - (self.player.maxx - self.player.posx) / BORDER_BUFFER) * -0.06
+        if self.player.posy < self.player.miny + BORDER_BUFFER:
+            reward += (1 - (self.player.posy - self.player.miny) / BORDER_BUFFER) * -0.06
+        if self.player.posy > self.player.maxy - BORDER_BUFFER:
+            reward += (1 - (self.player.maxy - self.player.posy) / BORDER_BUFFER) * -0.06
 
         # player bullets vs enemies collision: circle-vs-circle using radius fields
         # collision detection: use a simple circle (player center, radius from BaseChar) vs bullet centers
@@ -234,7 +262,7 @@ class TouhouEnv:
                 # punish our bullets going out of screen, not shooting boss
                 if bullet.posy < bullet.miny - bullet.rect.height/2:
                     try:
-                        reward += -0.1
+                        # reward += -0.1
                         bullet.kill()
                     except Exception as e:
                         print(f'an exception occured during clearing out-screen bullet: {e}')
@@ -273,7 +301,7 @@ class TouhouEnv:
                     min_dist = np.sqrt(dist_sq)
                 # collision if distance between centers <= (player radius + bullet radius)
                 if dist_sq <= (self.player.radius + br) ** 2:
-                    reward += -30.0
+                    reward += -40.0
                     done = True
             # reward += -3. / min_dist
         except Exception as e:
@@ -361,6 +389,10 @@ class TouhouEnv:
             self._boss_change_direction()
         elif event.type == TouhouEnv.BOSS_SPRAY_EVENT:
             self._boss_spray()
+        elif event.type == pygame.KEYDOWN:
+            self._handle_keydown(event)
+        elif event.type == pygame.KEYUP:
+            self._handle_keyup(event)
             
             
     def start_shoot_timer(self, interval_ms: int = 300):
@@ -402,7 +434,7 @@ class TouhouEnv:
         pygame.time.set_timer(TouhouEnv.BOSS_SPRAY_EVENT, 0)
 
     def _boss_spray(self):
-        for theta in np.linspace(0, 2 * np.pi, num=18, endpoint=False):
+        for theta in np.linspace(0, 2 * np.pi, num=12, endpoint=False):
             self.enemy_bullets.add(SprayBullet( # type: ignore
                 self.boss.posx,
                 self.boss.posy,
@@ -420,3 +452,45 @@ class TouhouEnv:
                 target_size=(30, 30),
                 inverse=True
             ))
+
+    def _handle_keydown(self, event):
+        key = event.key
+        if key == pygame.K_UP:
+            self.isup = True
+            self.playerdiry = -1
+        elif key == pygame.K_DOWN:
+            self.isdown = True
+            self.playerdiry = 1
+        elif key == pygame.K_LEFT:
+            self.isleft = True
+            self.playerdirx = -1
+        elif key == pygame.K_RIGHT:
+            self.isright = True
+            self.playerdirx = 1
+
+    def _handle_keyup(self, event):
+        key = event.key
+        if key == pygame.K_UP:
+            self.isup = False
+            if self.isdown:
+                self.playerdiry = 1
+            else:
+                self.playerdiry = 0
+        elif key == pygame.K_DOWN:
+            self.isdown = False
+            if self.isup:
+                self.playerdiry = -1
+            else:
+                self.playerdiry = 0
+        elif key == pygame.K_LEFT:
+            self.isleft = False
+            if self.isright:
+                self.playerdirx = 1
+            else:
+                self.playerdirx = 0
+        elif key == pygame.K_RIGHT:
+            self.isright = False
+            if self.isleft:
+                self.playerdirx = -1
+            else:
+                self.playerdirx = 0

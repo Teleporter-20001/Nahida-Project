@@ -16,7 +16,7 @@ class Boss(BaseChar):
             y: float,
             radius: int,
             img_path: str,
-            health: int = 250,
+            health: int = 100,
             vx: float=0,
             vy: float=0,
             target_size: tuple[int, int]=(-1, -1),
@@ -40,10 +40,11 @@ class Boss(BaseChar):
     def generate_speed(self):
         self.vx = self.ORIGIN_SPEED * cos(self.direction)
         self.vy = self.ORIGIN_SPEED * sin(self.direction)
-        if self.rect.left + self.vx / Settings.FPS < 0 or self.rect.right + self.vx / Settings.FPS > Settings.window_width:
+        BUFFER = 20
+        if self.posx + self.vx / Settings.FPS < self.minx + BUFFER or self.posx + self.vx / Settings.FPS > self.maxx - BUFFER:
             self.direction = pi - self.direction
             self.vx = -self.vx
-        if self.rect.top + self.vy / Settings.FPS < 0 or self.rect.bottom + self.vy / Settings.FPS > self.maxy:
+        if self.posy + self.vy / Settings.FPS < self.miny + BUFFER or self.posy + self.vy / Settings.FPS > self.maxy - BUFFER:
             self.direction = -self.direction
             self.vy = -self.vy
         

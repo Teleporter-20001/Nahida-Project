@@ -51,12 +51,12 @@ class BaseChar(pygame.sprite.Sprite):
     def update(self):
         delta_posx = self.vx / Settings.FPS
         tempcenterx = round(self._posx + delta_posx)
-        if not self.no_out or (self.rect.left + delta_posx > self.minx and self.rect.right + delta_posx < self.maxx):
+        if not self.no_out or (self.minx < tempcenterx < self.maxx):
             self._posx += delta_posx
             self.rect.centerx = tempcenterx
         delta_posy = self.vy / Settings.FPS
         tempcentery = round(self._posy + delta_posy)
-        if not self.no_out or (self.rect.top + delta_posy > self.miny and self.rect.bottom + delta_posy < self.maxy):
+        if not self.no_out or (self.miny < tempcentery < self.maxy):
             self._posy += delta_posy
             self.rect.centery = tempcentery
 

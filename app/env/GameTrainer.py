@@ -84,10 +84,15 @@ class GameTrainer:
     def train(self, episodes: int):
         # print(f'current dir: {os.getcwd()}')
         process_drawer = ProcessDrawer()
-        begin_episode = 6500
+        begin_episode = 7200
+        # ----- normal params -----
         epsilon_begin = 1.0
-        epsilon_end = 0.05
-        epsilon_decay = 0.992
+        epsilon_end = 0.01
+        epsilon_decay = 0.99
+        # ----- this set of param is for teaching mode -----
+        # epsilon_begin = 0.
+        # epsilon_end = 0.
+        # epsilon_decay = 0.99
         repeat_period = 400
         epsilon = epsilon_begin
 

@@ -10,7 +10,7 @@ from app.Agent.Networks.LinearNet import LinearNet
 
 class SmartBrain1(BaseBrain):
 
-    def __init__(self):
+    def __init__(self, teached=False):
         super().__init__()
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         print(f'using device: {self.device}')
@@ -22,13 +22,16 @@ class SmartBrain1(BaseBrain):
             bullet_num=10,
             num_actions=len(Action)
         ).to(self.device)
-        self.model_path = os.path.join('Agent', 'models', 'LinearNet_6500.pth')
+        self.model_path = os.path.join('Agent', 'models', 'LinearNet_7200.pth')
         if self.model_path:
             self.net.load_state_dict(torch.load(self.model_path))
             print(f'loaded model from {self.model_path}')
+        self.teached = teached
 
-    def decide_action(self, state: State, train=False) -> Action:
+    def decide_action(self, state: State) -> Action:
         obs = state.observation
+        if self.teached:
+            return obs.get('human_action', Action.LEFTUP)
         with torch.no_grad():
             # 将 observation 转为 tensor，并添加 batch 维度
             obs_tensor = {

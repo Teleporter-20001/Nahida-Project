@@ -1,11 +1,11 @@
 import matplotlib
 matplotlib.use('Qt5Agg')
 import matplotlib.pyplot as plt
+import os
 
 class ProcessDrawer:
     def __init__(self, title="Dynamic Curve", xlabel="epoch", ylabel="y", color="b-"):
 
-        import os
         os.environ['SDL_VIDEO_WINDOW_POS'] = "1000,200"
 
         plt.ion()  # 打开交互模式
@@ -29,11 +29,10 @@ class ProcessDrawer:
         self.x_data.clear()
         self.y_data.clear()
 
-    def update(self, pause_time=0.01):
-        """更新图像"""
+    def update(self):
+        """更新图像，但不抢占焦点"""
         self.line.set_data(self.x_data, self.y_data)
-        self.ax.relim()            # 重新计算数据范围
-        self.ax.autoscale_view()   # 自动缩放坐标
-        self.fig.canvas.draw()     # 重绘
-        plt.pause(pause_time)      # 短暂暂停以刷新窗口
-        # gc.collect()               # 手动进行垃圾回收
+        self.ax.relim()
+        self.ax.autoscale_view()
+        self.fig.canvas.draw_idle()   # 标记需要重绘，不立即抢焦点
+        self.fig.canvas.flush_events()  # 刷新事件队列，但不 raise 窗口
