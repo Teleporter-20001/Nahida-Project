@@ -22,7 +22,7 @@ class SmartBrain1(BaseBrain):
             bullet_num=10,
             num_actions=len(Action)
         ).to(self.device)
-        self.model_path = os.path.join('Agent', 'models', 'LinearNet_2350.pth')
+        self.model_path = os.path.join('Agent', 'models', 'LinearNet_6500.pth')
         if self.model_path:
             self.net.load_state_dict(torch.load(self.model_path))
             print(f'loaded model from {self.model_path}')

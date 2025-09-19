@@ -84,10 +84,11 @@ class GameTrainer:
     def train(self, episodes: int):
         # print(f'current dir: {os.getcwd()}')
         process_drawer = ProcessDrawer()
-        begin_episode = 2350
+        begin_episode = 6500
         epsilon_begin = 1.0
-        epsilon_end = 0.1
-        epsilon_decay = 0.993
+        epsilon_end = 0.05
+        epsilon_decay = 0.992
+        repeat_period = 400
         epsilon = epsilon_begin
 
         with open(os.path.join('Agent', 'models', 'reward_record.csv'), 'w') as reward_file:
@@ -97,7 +98,7 @@ class GameTrainer:
 
             for episode in range(episodes):
 
-                epsilon = max(epsilon_end, epsilon_begin * epsilon_decay ** (episode % 300))
+                epsilon = max(epsilon_end, epsilon_begin * epsilon_decay ** (episode % repeat_period))
                 reward = self.run_training_episode(render=True, epsilon=epsilon)
 
                 print(f"Episode {episode} finished, epsilon={epsilon}, reward={reward}")

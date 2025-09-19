@@ -8,7 +8,7 @@ from app.common.Settings import Settings
 
 class Boss(BaseChar):
     
-    ORIGIN_SPEED = 100
+    ORIGIN_SPEED = 60
 
     def __init__(
             self,
