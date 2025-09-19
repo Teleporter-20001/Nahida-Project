@@ -24,6 +24,10 @@ class TouhouEnv:
     PLAYER_SHOOT_EVENT = pygame.USEREVENT + 1
     BOSS_CHANGE_DIR_EVENT = pygame.USEREVENT + 2
     BOSS_SPRAY_EVENT = pygame.USEREVENT + 3
+
+    PLAYER_SHOOT_PERIOD = int(Settings.FPS / 6)    # player shoot once every ? frames
+    BOSS_CHANGE_DIR_PERIOD = int(Settings.FPS * 2.5)
+    BOSS_SPRAY_PERIOD = int(Settings.FPS * 0.8)
     
     def __init__(self, settings=Settings):
         pygame.init()
@@ -35,6 +39,12 @@ class TouhouEnv:
         # optional: remove env var so it doesn't affect later windows
         # os.environ.pop('SDL_VIDEO_WINDOW_POS', None)
         pygame.display.set_caption('TouhouEnv')
+
+        # font for FPS display (initialized once)
+        try:
+            self.font = pygame.font.SysFont(None, 24)
+        except Exception:
+            self.font = None
 
         # sprite group holding the player (environment owns entities)
         self.players = pygame.sprite.Group()
@@ -68,7 +78,7 @@ class TouhouEnv:
         # }
 
         self._terminated = False
-        # custom pygame event for timed player shooting
+        self.worldAge: int = 0
 
     def _get_observation(self) -> State:
         
@@ -132,12 +142,14 @@ class TouhouEnv:
 
         self._terminated = False
         # restart automatic timer
-        self.stop_shoot_timer()
-        self.stop_boss_change_dir_timer()
-        self.stop_boss_spray_timer()
-        self.start_shoot_timer(130)
-        self.start_boss_change_dir_timer(2000)
-        self.start_boss_spray_timer(900)
+        # self.stop_shoot_timer()
+        # self.stop_boss_change_dir_timer()
+        # self.stop_boss_spray_timer()
+        # self.start_shoot_timer(130)
+        # self.start_boss_change_dir_timer(2000)
+        # self.start_boss_spray_timer(900)
+        self.worldAge = 0
+
         return self._get_observation()
 
 
@@ -148,6 +160,14 @@ class TouhouEnv:
         """
         if self._terminated:
             return self._get_observation(), 0.0, True, {}
+
+        # -------------------- handle events -------------------
+        if self.worldAge % self.PLAYER_SHOOT_PERIOD == 0:
+            self._player_shoot()
+        if self.worldAge % self.BOSS_CHANGE_DIR_PERIOD == 0:
+            self._boss_change_direction()
+        if self.worldAge % self.BOSS_SPRAY_PERIOD == 0:
+            self._boss_spray()
 
         # apply movement
         if isinstance(action, Action):
@@ -210,6 +230,15 @@ class TouhouEnv:
                             pass
                         # bullet hit an enemy; move to next bullet
                         break
+
+                # punish our bullets going out of screen, not shooting boss
+                if bullet.posy < bullet.miny - bullet.rect.height/2:
+                    try:
+                        reward += -0.1
+                        bullet.kill()
+                    except Exception as e:
+                        print(f'an exception occured during clearing out-screen bullet: {e}')
+
         except Exception as e:
             print(f'Error in bullet-vs-enemy collision: {e}')
             
@@ -253,6 +282,8 @@ class TouhouEnv:
 
         info = {}
 
+        self.worldAge += 1
+
         return self._get_observation(), reward, done, info
 
     def render(self):
@@ -288,6 +319,20 @@ class TouhouEnv:
                 pygame.draw.rect(self.screen, (200, 30, 30), (bar_x, bar_y, filled_width, bar_height))
             # border around full width
             pygame.draw.rect(self.screen, (0, 0, 0), (bar_x, bar_y, bar_full_width, bar_height), 2)
+        except Exception:
+            pass
+
+        # draw FPS at bottom-left for debugging/performance monitoring
+        try:
+            font = getattr(self, 'font', None)
+            if font is not None:
+                fps = self.clock.get_fps()
+                fps_surf = font.render(f'FPS: {fps:.1f}', True, (255, 255, 255))
+                fps_x = 6
+                fps_y = self.settings.window_height - fps_surf.get_height() - 60
+                # draw a small dark background rectangle for readability
+                pygame.draw.rect(self.screen, (0, 0, 0), (fps_x - 4, fps_y - 2, fps_surf.get_width() + 8, fps_surf.get_height() + 4))
+                self.screen.blit(fps_surf, (fps_x, fps_y))
         except Exception:
             pass
         pygame.display.update()
@@ -357,7 +402,7 @@ class TouhouEnv:
         pygame.time.set_timer(TouhouEnv.BOSS_SPRAY_EVENT, 0)
 
     def _boss_spray(self):
-        for theta in np.linspace(0, 2 * np.pi, num=24, endpoint=False):
+        for theta in np.linspace(0, 2 * np.pi, num=18, endpoint=False):
             self.enemy_bullets.add(SprayBullet( # type: ignore
                 self.boss.posx,
                 self.boss.posy,
@@ -365,4 +410,13 @@ class TouhouEnv:
                 os.path.join('resources', 'bullet_super.png'),
                 float(theta),
                 target_size=(30, 30)
+            ))
+            self.enemy_bullets.add(SprayBullet( # type: ignore
+                self.boss.posx,
+                self.boss.posy,
+                15,
+                os.path.join('resources', 'bullet_super.png'),
+                float(theta),
+                target_size=(30, 30),
+                inverse=True
             ))
