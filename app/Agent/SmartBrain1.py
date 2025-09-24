@@ -7,6 +7,7 @@ import torch
 from app.Agent.Networks.FeatureExtractor import QNetwork
 from app.Agent.Networks.LinearNet import LinearNet
 from app.common.Settings import Settings
+from app.common.utils import printyellow
 
 
 class SmartBrain1(BaseBrain):
@@ -30,7 +31,7 @@ class SmartBrain1(BaseBrain):
                 self.net.load_state_dict(torch.load(self.model_path))
                 print(f'loaded model from {self.model_path}')
             except Exception as e:
-                print(f'failed to load model from {self.model_path} because of: {e}')
+                printyellow(f'failed to load model from {self.model_path} because of: {e}')
         self.teached = teached
 
     def decide_action(self, state: State) -> Action:

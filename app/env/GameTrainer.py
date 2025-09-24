@@ -126,7 +126,7 @@ class GameTrainer:
                     try:
                         if not os.path.exists(save_dir):
                             os.makedirs(save_dir)
-                        save_path = os.path.join(save_dir, f'LinearNetv2_{episode + begin_episode}.pth')
+                        save_path = os.path.join(save_dir, f'LinearNet_{episode + begin_episode}.pth')
                         torch.save(self.trainer.policy_net.state_dict(), save_path)
                         print(f'Model saved to {save_path}')
                     except Exception as e:
@@ -144,7 +144,7 @@ class GameTrainer:
                 try:
                     if not os.path.exists(save_dir):
                         os.makedirs(save_dir)
-                    save_path = os.path.join(save_dir, f'LinearNetv2_{begin_episode}_offtrain_{step}.pth')
+                    save_path = os.path.join(save_dir, f'LinearNet_{begin_episode}_offtrain_{step}.pth')
                     torch.save(self.trainer.policy_net.state_dict(), save_path)
                 except Exception as e:
                     print(f"Error saving model: {e}")

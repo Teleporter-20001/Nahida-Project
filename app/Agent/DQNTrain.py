@@ -156,12 +156,12 @@ class ReplayBuffer:
 
 
 class DQNTrainer:
-    def __init__(self, brain: MemoryBrain, gamma=Settings.gamma, lr=Settings.lr, batch_size=Settings.batch_size, target_update=Settings.target_update):
+    def __init__(self, brain: SmartBrain1, gamma=Settings.gamma, lr=Settings.lr, batch_size=Settings.batch_size, target_update=Settings.target_update):
         self.brain = brain
         self.device = brain.device
         self.policy_net = brain.net
         # self.target_net = QNetwork(num_actions=len(Action), bullet_num=10, bullet_feat_dim=32).to(self.device)
-        self.target_net = LinearNetv2(
+        self.target_net = LinearNet(
             512,
             256,
             128,
@@ -257,7 +257,7 @@ class DQNTrainer:
             'boss_vely': torch.tensor([o['boss_vely'] for o in obs_list], dtype=torch.float32, device=self.device),
             # nearest_bullets may be a list of numpy arrays; convert once to a single numpy array to avoid
             # the slow path of creating a tensor from a list of ndarrays (warned by PyTorch).
-            'nearest_bullets': self._nearest_bullets_tensor2([o['nearest_bullets'] for o in obs_list]),
+            'nearest_bullets': torch.tensor([o['nearest_bullets'] for o in obs_list], dtype=torch.float32, device=self.device)
         }
 
     # def _nearest_bullets_tensor(self, nb_list):
@@ -292,16 +292,16 @@ class DQNTrainer:
     #         t = torch.tensor(arr, dtype=torch.float32, device=self.device)
     #     return t
 
-    def _nearest_bullets_tensor2(self, nb_list):
-        """Convert list of nearest_bullets (shape=(bullet_num,5)) to (batch, bullet_num,7)"""
-        # 用智能体的函数统一处理
-        processed = []
-        for bullets in nb_list:
-            # TODO: 检测特征是否已经是7维，如果是就跳过，如果不是就转化一次并**写入原来的地方**
-            bullets_7d = self.brain.augment_bullet_features(bullets)
-            processed.append(bullets_7d)
-
-        arr = np.stack(processed, axis=0).astype(np.float32)
-        t = torch.from_numpy(arr).to(self.device)
-        return t
+    # def _nearest_bullets_tensor2(self, nb_list):
+    #     """Convert list of nearest_bullets (shape=(bullet_num,5)) to (batch, bullet_num,7)"""
+    #     # 用智能体的函数统一处理
+    #     processed = []
+    #     for bullets in nb_list:
+    #         # TODO: 检测特征是否已经是7维，如果是就跳过，如果不是就转化一次并**写入原来的地方**
+    #         bullets_7d = self.brain.augment_bullet_features(bullets)
+    #         processed.append(bullets_7d)
+    #
+    #     arr = np.stack(processed, axis=0).astype(np.float32)
+    #     t = torch.from_numpy(arr).to(self.device)
+    #     return t
 

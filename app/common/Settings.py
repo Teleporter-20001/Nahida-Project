@@ -66,18 +66,22 @@ class Settings:
                     except Exception:
                         pass
             # try to load persisted settings from JSON (app/common/settings.json)
+            load_settings: bool = False
             try:
                 # settings file is located in the same directory as this file
-                base_dir = os.path.dirname(__file__)
-                cls._settings_path = os.path.join(base_dir, 'settings.json')
-                if os.path.exists(cls._settings_path):
-                    cls._instance._load_from_json(cls._settings_path)
+                if load_settings:
+                    base_dir = os.path.dirname(__file__)
+                    cls._settings_path = os.path.join(base_dir, 'settings.json')
+                    if os.path.exists(cls._settings_path):
+                        cls._instance._load_from_json(cls._settings_path)
             except Exception as e:
                 print(f"Failed to load settings.json: {e}")
 
             # after attribute population and load, attempt to show editor
+            show_editor: bool = False
             try:
-                # cls._instance._open_editor()
+                if show_editor:
+                    cls._instance._open_editor()
                 pass
             except Exception as e:
                 # editor failure should not crash; print for visibility
