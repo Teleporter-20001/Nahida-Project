@@ -11,11 +11,8 @@ from collections import deque, namedtuple
 import atexit
 import numpy as np
 
-from app.Agent.MemoryBrain import MemoryBrain
 from app.Agent.Networks.LinearNet import LinearNet
-from app.Agent.Networks.LinearNetv2 import LinearNetv2
-from app.Agent.SmartBrain1 import State, Action, SmartBrain1
-from app.Agent.Networks.FeatureExtractor import QNetwork
+from app.Agent.Brains.SmartBrain1 import State, Action, SmartBrain1
 from app.common.Settings import Settings
 
 Transition = namedtuple('Transition', ('state', 'action', 'reward', 'next_state', 'done'))
@@ -28,7 +25,7 @@ class ReplayBuffer:
     # legacy_filepath = os.path.join('Agent', 'models', 'replay_buffer.pkl')
     legacy_filepath = ''
 
-    def __init__(self, capacity=700000, chunk_size=5000):
+    def __init__(self, capacity=300000, chunk_size=5000):
         self.buffer = deque(maxlen=capacity)
         self.chunk_size = chunk_size
         # internal counter to track how many new transitions since last on-disk save
@@ -182,13 +179,9 @@ class DQNTrainer:
     def select_action(self, state: State, epsilon=0.1):
         """epsilon-greedy"""
         if random.random() < epsilon:
-            # return random.randrange(len(Action))
             return random.choice(list(Action))
         else:
             with torch.no_grad():
-                # obs_tensor = self.brain.net._obs_to_tensor(state.observation)
-                # q_values = self.policy_net(obs_tensor)
-                # return q_values.argmax(dim=1).item()
                 return self.brain.decide_action(state)
 
     def optimize_model(self):

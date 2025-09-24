@@ -1,10 +1,9 @@
 import os
-from app.Agent.BaseBrain import BaseBrain
+from app.Agent.Brains.BaseBrain import BaseBrain
 from app.Agent.DataStructure import State, Action
 
 import torch
 
-from app.Agent.Networks.FeatureExtractor import QNetwork
 from app.Agent.Networks.LinearNet import LinearNet
 from app.common.Settings import Settings
 from app.common.utils import printyellow

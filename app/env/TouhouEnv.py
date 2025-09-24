@@ -42,9 +42,9 @@ class TouhouEnv:
 
     PLAYER_SHOOT_PERIOD = int(Settings.FPS / 8)    # player shoot once every ? frames
     BOSS_CHANGE_DIR_PERIOD = int(Settings.FPS * 2.5)
-    BOSS_SPRAY_PERIOD = int(Settings.FPS * 3.5)
-    BOSS_AIMAT_PLAYER_SHOOT_PERIOD = int(Settings.FPS * 2.7)
-    BOSS_RAIN_PERIOD = int(Settings.FPS * 2)
+    BOSS_SPRAY_PERIOD = int(Settings.FPS * 4)
+    BOSS_AIMAT_PLAYER_SHOOT_PERIOD = int(Settings.FPS * 4)
+    BOSS_RAIN_PERIOD = int(Settings.FPS * 3)
     
     def __init__(self, settings=Settings):
 
@@ -197,13 +197,14 @@ class TouhouEnv:
             return self._get_observation(), 0.0, True, {}
 
         # -------------------- handle events -------------------
+        _offset = int(Settings.FPS / 4)
         if self.worldAge % self.PLAYER_SHOOT_PERIOD == 0:
             self._player_shoot()
         if self.worldAge % self.BOSS_CHANGE_DIR_PERIOD == 0:
             self._boss_change_direction()
-        if self.worldAge % self.BOSS_SPRAY_PERIOD == 0:
+        if (self.worldAge + _offset) % self.BOSS_SPRAY_PERIOD == 0:
             self._boss_spray()
-        if self.worldAge % self.BOSS_AIMAT_PLAYER_SHOOT_PERIOD == 0:
+        if (self.worldAge + _offset) % self.BOSS_AIMAT_PLAYER_SHOOT_PERIOD == 0:
             self._boss_aimat_player_shoot()
         if self.worldAge % self.BOSS_RAIN_PERIOD == 0:
             self._boss_rain()
@@ -311,7 +312,7 @@ class TouhouEnv:
                 if dist < min_dist:
                     min_dist = dist
                 # encourage to avoid bullets closely: $ [px - bx, py - by] \dot [vx, vy] < 0$
-                if dist < self.player.radius + br + 50 and np.dot([dx, dy], [bullet.vx, bullet.vy]) < 0:
+                if dist < self.player.radius + br + 40 and np.dot([dx, dy], [bullet.vx, bullet.vy]) < 0:
                     reward.avoid()
                 # collision if distance between centers <= (player radius + bullet radius)
                 if dist_sq <= (self.player.radius + br) ** 2:
@@ -451,8 +452,8 @@ class TouhouEnv:
         pygame.time.set_timer(TouhouEnv.BOSS_SPRAY_EVENT, 0)
 
     def _boss_spray(self):
-        r = random.randint(8, 16)
-        bullet_num = random.randint(4, 8)
+        r = random.randint(6, 12)
+        bullet_num = random.randint(3, 5)
         for theta in np.linspace(0, 2 * np.pi, num=bullet_num, endpoint=False):
             self.enemy_bullets.add(SprayBullet( # type: ignore
                 self.boss.posx,
@@ -460,7 +461,7 @@ class TouhouEnv:
                 r,
                 os.path.join('resources', 'bullet_super.png'),
                 float(theta),
-                target_size=(30, 30)
+                target_size=(2*r, 2*r)
             ))
             self.enemy_bullets.add(SprayBullet( # type: ignore
                 self.boss.posx,
@@ -468,7 +469,7 @@ class TouhouEnv:
                 r,
                 os.path.join('resources', 'bullet_super.png'),
                 float(theta),
-                target_size=(30, 30),
+                target_size=(2*r, 2*r),
                 inverse=True
             ))
 
@@ -518,22 +519,32 @@ class TouhouEnv:
         self.enemy_bullets.add(AimatPlayerBullet(   # type: ignore
             self.boss.posx,
             self.boss.posy,
-            random.randint(10, 21),
+            random.randint(6, 14),
             os.path.join('resources', 'bullet_super.png'),
             self.player.posx,
             self.player.posy
         ))
 
     def _boss_rain(self):
-        bullet_num = 7
-        room_size = int(Settings.window_width / bullet_num) - 1
-        begin_x = random.randint(0, room_size)
-        for i in range(bullet_num):
-            self.enemy_bullets.add(StraightEnemyBullet( # type: ignore
-                begin_x + i * room_size,
-                30,
-                random.randint(8, 18),
-                os.path.join('resources', 'bullet_super.png'),
-                pi / 2
-            ))
+        bullet_num = random.randint(3, 5)
+        room_size_x = int(Settings.window_width / bullet_num) - 1
+        room_size_y = int(Settings.window_height / bullet_num) - 1
+        for _dir in [1, -1]:
+            begin_x = random.randint(0, room_size_x)
+            begin_y = random.randint(0, room_size_y)
+            for i in range(bullet_num):
+                self.enemy_bullets.add(StraightEnemyBullet( # type: ignore
+                    begin_x + i * room_size_x,
+                    Settings.window_height / 2 - Settings.window_height / 2 * 0.95 * _dir,
+                    random.randint(8, 12),
+                    os.path.join('resources', 'bullet_super.png'),
+                    pi / 2 * _dir
+                ))
+                self.enemy_bullets.add(StraightEnemyBullet( # type: ignore
+                    Settings.window_width / 2 - Settings.window_width / 2 * 0.95 * _dir,
+                    begin_y + i * room_size_y,
+                    random.randint(8, 12),
+                    os.path.join('resources', 'bullet_super.png'),
+                    pi / 2 * (_dir - 1)
+                ))
 

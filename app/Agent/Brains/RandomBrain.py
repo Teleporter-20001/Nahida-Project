@@ -1,5 +1,5 @@
 from random import choice
-from app.Agent.BaseBrain import BaseBrain
+from app.Agent.Brains.BaseBrain import BaseBrain
 from app.Agent.DataStructure import State, Action
 
 

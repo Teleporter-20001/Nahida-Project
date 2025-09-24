@@ -28,17 +28,18 @@ class Settings:
     # related to reward
     alive_reward: float = 0.035
     BORDER_BUFFER: int = 60
-    BORDER_PUNISH: float = -0.5
+    BORDER_PUNISH: float = -0.4
     hit_reward: float = 0.6
     kill_boss_reward: float = 80.0
     behit_reward: float = -100.0
     avoid_reward: float = 0.2
 
     # related to training
-    batch_size: int = 1024
+    batch_size: int = 256
     gamma: float = 0.991
-    lr: float = 1e-3
+    lr: float = 1e-4
     target_update: int = 1500
+    net_name = 'RecurrentQNet'
     # --------------------
     render: bool = True
     begin_episode: int = 0

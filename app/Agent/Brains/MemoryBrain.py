@@ -4,7 +4,7 @@ from typing import Deque
 import numpy as np
 import torch
 
-from app.Agent.BaseBrain import BaseBrain
+from app.Agent.Brains.BaseBrain import BaseBrain
 from app.Agent.DataStructure import State, Action
 from app.Agent.Networks.LinearNetv2 import LinearNetv2
 from app.common.Settings import Settings

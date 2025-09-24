@@ -1,8 +1,4 @@
-import pygame
-
-from app.Agent.BaseBrain import BaseBrain
 from app.Agent.DataStructure import Action
-from app.Agent.RandomBrain import RandomBrain
 from app.characters.BaseChar import BaseChar
 
 

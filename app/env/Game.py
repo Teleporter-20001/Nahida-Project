@@ -1,8 +1,7 @@
 import pygame
 import sys
 
-from app.Agent.BaseBrain import BaseBrain
-from app.Agent.RandomBrain import RandomBrain
+from app.Agent.Brains.BaseBrain import BaseBrain
 from app.env.TouhouEnv import TouhouEnv
 from app.common.Settings import Settings
 

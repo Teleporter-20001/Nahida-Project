@@ -4,20 +4,19 @@ import numpy as np
 import pygame
 import sys
 import torch
-import random
 
 from tqdm import tqdm
 
+from app.Agent.Trainers.DRQNTrain import DRQNTrainer
 from app.common.ProcessDrawer import ProcessDrawer
 from app.common.Settings import Settings
 from app.env.RewardSet import RewardSet
 from app.env.TouhouEnv import TouhouEnv
-from app.Agent.DQNTrain import DQNTrainer
 
 class GameTrainer:
     """Game loop for training with DQN"""
 
-    def __init__(self, env: TouhouEnv, trainer: DQNTrainer):
+    def __init__(self, env: TouhouEnv, trainer: DRQNTrainer):
         self.env = env
         self.trainer = trainer  # DQNTrainer
 
@@ -121,12 +120,12 @@ class GameTrainer:
                     process_drawer.update()
                 except Exception as error:
                     print(f"Error writing reward to file: {error}")
-                if episode % 50 == 0 and episode:
+                if episode % 25 == 0 and episode:
                     save_dir = os.path.join('Agent', 'models')
                     try:
                         if not os.path.exists(save_dir):
                             os.makedirs(save_dir)
-                        save_path = os.path.join(save_dir, f'LinearNet_{episode + begin_episode}.pth')
+                        save_path = os.path.join(save_dir, f'{Settings.net_name}_{episode + begin_episode}.pth')
                         torch.save(self.trainer.policy_net.state_dict(), save_path)
                         print(f'Model saved to {save_path}')
                     except Exception as e:
@@ -144,7 +143,7 @@ class GameTrainer:
                 try:
                     if not os.path.exists(save_dir):
                         os.makedirs(save_dir)
-                    save_path = os.path.join(save_dir, f'LinearNet_{begin_episode}_offtrain_{step}.pth')
+                    save_path = os.path.join(save_dir, f'{Settings.net_name}_{begin_episode}_offtrain_{step}.pth')
                     torch.save(self.trainer.policy_net.state_dict(), save_path)
                 except Exception as e:
                     print(f"Error saving model: {e}")
