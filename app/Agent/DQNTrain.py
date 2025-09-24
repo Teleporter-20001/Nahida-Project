@@ -257,40 +257,40 @@ class DQNTrainer:
             'boss_vely': torch.tensor([o['boss_vely'] for o in obs_list], dtype=torch.float32, device=self.device),
             # nearest_bullets may be a list of numpy arrays; convert once to a single numpy array to avoid
             # the slow path of creating a tensor from a list of ndarrays (warned by PyTorch).
-            'nearest_bullets': torch.tensor([o['nearest_bullets'] for o in obs_list], dtype=torch.float32, device=self.device)
+            'nearest_bullets': self._nearest_bullets_tensor([o['nearest_bullets'] for o in obs_list]),
         }
 
-    # def _nearest_bullets_tensor(self, nb_list):
-    #     """Convert a list of nearest_bullets (possibly numpy arrays) to a single torch tensor on device.
-    #
-    #     Accepts: nb_list: list of arrays or lists, shape per-item = (bullet_num, bullet_feat_dim)
-    #     Returns: torch.FloatTensor of shape (batch, bullet_num, bullet_feat_dim) on self.device
-    #     """
-    #     # Fast path: if already a numpy array
-    #     if isinstance(nb_list, np.ndarray):
-    #         arr = nb_list
-    #     else:
-    #         # Try to stack into a numpy array. Use dtype float32 for compatibility with torch.float32.
-    #         try:
-    #             arr = np.array(nb_list, dtype=np.float32)
-    #         except Exception:
-    #             # Last-resort: build with python list comprehension and explicit conversion
-    #             arr = np.stack([np.array(x, dtype=np.float32) for x in nb_list], axis=0)
-    #
-    #     # Ensure dtype float32
-    #     if arr.dtype != np.float32:
-    #         try:
-    #             arr = arr.astype(np.float32)
-    #         except Exception:
-    #             arr = arr.astype(np.float32, copy=False)
-    #
-    #     # Convert to torch tensor and move to device
-    #     try:
-    #         t = torch.from_numpy(arr).to(self.device)
-    #     except Exception:
-    #         # Fallback: create tensor from list (slower), but keep dtype/device consistent
-    #         t = torch.tensor(arr, dtype=torch.float32, device=self.device)
-    #     return t
+    def _nearest_bullets_tensor(self, nb_list):
+        """Convert a list of nearest_bullets (possibly numpy arrays) to a single torch tensor on device.
+
+        Accepts: nb_list: list of arrays or lists, shape per-item = (bullet_num, bullet_feat_dim)
+        Returns: torch.FloatTensor of shape (batch, bullet_num, bullet_feat_dim) on self.device
+        """
+        # Fast path: if already a numpy array
+        if isinstance(nb_list, np.ndarray):
+            arr = nb_list
+        else:
+            # Try to stack into a numpy array. Use dtype float32 for compatibility with torch.float32.
+            try:
+                arr = np.array(nb_list, dtype=np.float32)
+            except Exception:
+                # Last-resort: build with python list comprehension and explicit conversion
+                arr = np.stack([np.array(x, dtype=np.float32) for x in nb_list], axis=0)
+
+        # Ensure dtype float32
+        if arr.dtype != np.float32:
+            try:
+                arr = arr.astype(np.float32)
+            except Exception:
+                arr = arr.astype(np.float32, copy=False)
+
+        # Convert to torch tensor and move to device
+        try:
+            t = torch.from_numpy(arr).to(self.device)
+        except Exception:
+            # Fallback: create tensor from list (slower), but keep dtype/device consistent
+            t = torch.tensor(arr, dtype=torch.float32, device=self.device)
+        return t
 
     # def _nearest_bullets_tensor2(self, nb_list):
     #     """Convert list of nearest_bullets (shape=(bullet_num,5)) to (batch, bullet_num,7)"""
