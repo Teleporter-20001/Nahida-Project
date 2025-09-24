@@ -6,12 +6,15 @@ from math import sin, cos, pi
 import numpy as np
 import heapq
 
+from app.characters.AimatPlayerBullet import AimatPlayerBullet
 from app.characters.Nahida import Nahida
 from app.characters.Boss import Boss
 from app.characters.OurBullet import OurBullet
 from app.characters.SprayBullet import SprayBullet
+from app.characters.StraightEnemyBullet import StraightEnemyBullet
 from app.common.Settings import Settings
 from app.Agent.DataStructure import State, Action
+from app.env.RewardSet import RewardSet
 
 
 class TouhouEnv:
@@ -37,9 +40,11 @@ class TouhouEnv:
     BOSS_CHANGE_DIR_EVENT = pygame.USEREVENT + 2
     BOSS_SPRAY_EVENT = pygame.USEREVENT + 3
 
-    PLAYER_SHOOT_PERIOD = int(Settings.FPS / 6)    # player shoot once every ? frames
+    PLAYER_SHOOT_PERIOD = int(Settings.FPS / 8)    # player shoot once every ? frames
     BOSS_CHANGE_DIR_PERIOD = int(Settings.FPS * 2.5)
-    BOSS_SPRAY_PERIOD = int(Settings.FPS * 1.2)
+    BOSS_SPRAY_PERIOD = int(Settings.FPS * 3.5)
+    BOSS_AIMAT_PLAYER_SHOOT_PERIOD = int(Settings.FPS * 2.7)
+    BOSS_RAIN_PERIOD = int(Settings.FPS * 2)
     
     def __init__(self, settings=Settings):
 
@@ -158,8 +163,8 @@ class TouhouEnv:
         self.player._posx = int(self.settings.window_width * .5)
         self.player._posy = int(self.settings.window_height * .75)
 
-        self.boss._posx = int(self.settings.window_width / 4)
-        # self.boss._posx = int(random.randint(self.boss.rect.width/2 + 5, self.settings.window_width - self.boss.rect.width/2 - 5))
+        # self.boss._posx = int(self.settings.window_width / 4)
+        self.boss._posx = int(random.randint(self.boss.rect.width/2 + 5, self.settings.window_width - self.boss.rect.width/2 - 5))
         self.boss._posy = int(self.settings.window_height / 5)
         self.boss.health = self.boss.max_health
 
@@ -186,6 +191,8 @@ class TouhouEnv:
 
         Returns: (next_state: State, reward: float, done: bool, info: dict)
         """
+        reward: RewardSet = RewardSet()
+
         if self._terminated:
             return self._get_observation(), 0.0, True, {}
 
@@ -196,6 +203,10 @@ class TouhouEnv:
             self._boss_change_direction()
         if self.worldAge % self.BOSS_SPRAY_PERIOD == 0:
             self._boss_spray()
+        if self.worldAge % self.BOSS_AIMAT_PLAYER_SHOOT_PERIOD == 0:
+            self._boss_aimat_player_shoot()
+        if self.worldAge % self.BOSS_RAIN_PERIOD == 0:
+            self._boss_rain()
 
         # apply movement
         if isinstance(action, Action):
@@ -208,19 +219,18 @@ class TouhouEnv:
         self.enemy_bullets.update()
 
         # placeholder reward: small positive reward to encourage alive
-        reward = 3./40
+        reward.survive()
         done = False
         
-        # punish player going to edge
-        BORDER_BUFFER = 60
-        if self.player.posx < self.player.minx + BORDER_BUFFER:
-            reward += (1 - (self.player.posx - self.player.minx) / BORDER_BUFFER) * -0.06
-        if self.player.posx > self.player.maxx - BORDER_BUFFER:
-            reward += (1 - (self.player.maxx - self.player.posx) / BORDER_BUFFER) * -0.06
-        if self.player.posy < self.player.miny + BORDER_BUFFER:
-            reward += (1 - (self.player.posy - self.player.miny) / BORDER_BUFFER) * -0.06
-        if self.player.posy > self.player.maxy - BORDER_BUFFER:
-            reward += (1 - (self.player.maxy - self.player.posy) / BORDER_BUFFER) * -0.06
+        # punish player going to edges
+        if self.player.posx < self.player.minx + self.settings.BORDER_BUFFER:
+            reward.edge_punish((1 - (self.player.posx - self.player.minx) / self.settings.BORDER_BUFFER) * self.settings.BORDER_PUNISH)
+        if self.player.posx > self.player.maxx - self.settings.BORDER_BUFFER:
+            reward.edge_punish((1 - (self.player.maxx - self.player.posx) / self.settings.BORDER_BUFFER) * self.settings.BORDER_PUNISH)
+        if self.player.posy < self.player.miny + self.settings.BORDER_BUFFER:
+            reward.edge_punish((1 - (self.player.posy - self.player.miny) / self.settings.BORDER_BUFFER) * self.settings.BORDER_PUNISH)
+        if self.player.posy > self.player.maxy - self.settings.BORDER_BUFFER:
+            reward.edge_punish((1 - (self.player.maxy - self.player.posy) / self.settings.BORDER_BUFFER) * self.settings.BORDER_PUNISH)
 
         # player bullets vs enemies collision: circle-vs-circle using radius fields
         # collision detection: use a simple circle (player center, radius from BaseChar) vs bullet centers
@@ -250,7 +260,7 @@ class TouhouEnv:
                         try:
                             if hasattr(enemy, 'health'):
                                 enemy.health -= 1
-                                reward += 0.2
+                                reward.hit_enemy()
                                 # if getattr(enemy, 'health', 0) <= 0:
                                     # enemy.kill()
                                     # reward += 10.0
@@ -271,7 +281,7 @@ class TouhouEnv:
             print(f'Error in bullet-vs-enemy collision: {e}')
             
         if not self.boss.alive:
-            reward += 50.0
+            reward.killenemy()
             self._terminated = True
             done = True
 
@@ -297,22 +307,28 @@ class TouhouEnv:
                 dx = px - bx
                 dy = py - by
                 dist_sq = dx * dx + dy * dy
-                if np.sqrt(dist_sq) < min_dist:
-                    min_dist = np.sqrt(dist_sq)
+                dist = np.sqrt(dist_sq)
+                if dist < min_dist:
+                    min_dist = dist
+                # encourage to avoid bullets closely: $ [px - bx, py - by] \dot [vx, vy] < 0$
+                if dist < self.player.radius + br + 50 and np.dot([dx, dy], [bullet.vx, bullet.vy]) < 0:
+                    reward.avoid()
                 # collision if distance between centers <= (player radius + bullet radius)
                 if dist_sq <= (self.player.radius + br) ** 2:
-                    reward += -40.0
+                    reward.behit()
                     done = True
             # reward += -3. / min_dist
         except Exception as e:
             # defensive: if sprites/groups aren't set up as expected, don't crash the env
             print(f'Error in collision detection: {e}')
 
-        info = {}
+        info = {
+            'reward_details': reward
+        }
 
         self.worldAge += 1
 
-        return self._get_observation(), reward, done, info
+        return self._get_observation(), reward.value, done, info
 
     def render(self):
         """Render one frame to the screen."""
@@ -389,6 +405,7 @@ class TouhouEnv:
             self._boss_change_direction()
         elif event.type == TouhouEnv.BOSS_SPRAY_EVENT:
             self._boss_spray()
+        # ------------- events based on timer may not be used anymore -------------
         elif event.type == pygame.KEYDOWN:
             self._handle_keydown(event)
         elif event.type == pygame.KEYUP:
@@ -410,7 +427,7 @@ class TouhouEnv:
             10,
             os.path.join('resources', 'butterfly.png'),
             0,
-            -1500,
+            -1800,
             (20, 20)
         ))
         
@@ -434,11 +451,13 @@ class TouhouEnv:
         pygame.time.set_timer(TouhouEnv.BOSS_SPRAY_EVENT, 0)
 
     def _boss_spray(self):
-        for theta in np.linspace(0, 2 * np.pi, num=12, endpoint=False):
+        r = random.randint(8, 16)
+        bullet_num = random.randint(4, 8)
+        for theta in np.linspace(0, 2 * np.pi, num=bullet_num, endpoint=False):
             self.enemy_bullets.add(SprayBullet( # type: ignore
                 self.boss.posx,
                 self.boss.posy,
-                15,
+                r,
                 os.path.join('resources', 'bullet_super.png'),
                 float(theta),
                 target_size=(30, 30)
@@ -446,7 +465,7 @@ class TouhouEnv:
             self.enemy_bullets.add(SprayBullet( # type: ignore
                 self.boss.posx,
                 self.boss.posy,
-                15,
+                r,
                 os.path.join('resources', 'bullet_super.png'),
                 float(theta),
                 target_size=(30, 30),
@@ -494,3 +513,27 @@ class TouhouEnv:
                 self.playerdirx = -1
             else:
                 self.playerdirx = 0
+
+    def _boss_aimat_player_shoot(self):
+        self.enemy_bullets.add(AimatPlayerBullet(   # type: ignore
+            self.boss.posx,
+            self.boss.posy,
+            random.randint(10, 21),
+            os.path.join('resources', 'bullet_super.png'),
+            self.player.posx,
+            self.player.posy
+        ))
+
+    def _boss_rain(self):
+        bullet_num = 7
+        room_size = int(Settings.window_width / bullet_num) - 1
+        begin_x = random.randint(0, room_size)
+        for i in range(bullet_num):
+            self.enemy_bullets.add(StraightEnemyBullet( # type: ignore
+                begin_x + i * room_size,
+                30,
+                random.randint(8, 18),
+                os.path.join('resources', 'bullet_super.png'),
+                pi / 2
+            ))
+

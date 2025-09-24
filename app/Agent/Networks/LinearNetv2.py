@@ -5,13 +5,13 @@ import torch.nn.functional as F
 from app.common.Settings import Settings
 
 
-class LinearNet(nn.Module):
+class LinearNetv2(nn.Module):
 
     def __init__(self, hidden_dim1, hidden_dim2, hidden_dim3, hidden_dim4, bullet_num=10, num_actions=9):
         super().__init__()
         self.bullet_num = bullet_num
         self.num_actions = num_actions
-        self.fc1 = nn.Linear(6 + self.bullet_num * 5, hidden_dim1)
+        self.fc1 = nn.Linear(6 + self.bullet_num * 7, hidden_dim1)
         self.fc2 = nn.Linear(hidden_dim1, hidden_dim2)
         self.fc3 = nn.Linear(hidden_dim2, hidden_dim3)
         self.fc4 = nn.Linear(hidden_dim3, hidden_dim4)
@@ -33,7 +33,7 @@ class LinearNet(nn.Module):
         other = self._obs_to_tensor(obs)
         batch_size = other.shape[0]
         # (batch, k, 5) -> (batch, k*5)
-        bullet_feats = obs['nearest_bullets'].reshape(batch_size, self.bullet_num * 5)
+        bullet_feats = obs['nearest_bullets'].reshape(batch_size, self.bullet_num * 7)
         other_p = torch.cat([other, bullet_feats], dim=1)
 
         x = F.selu(self.fc1(other_p))

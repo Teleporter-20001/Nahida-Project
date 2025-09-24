@@ -11,9 +11,12 @@ from collections import deque, namedtuple
 import atexit
 import numpy as np
 
+from app.Agent.MemoryBrain import MemoryBrain
 from app.Agent.Networks.LinearNet import LinearNet
+from app.Agent.Networks.LinearNetv2 import LinearNetv2
 from app.Agent.SmartBrain1 import State, Action, SmartBrain1
 from app.Agent.Networks.FeatureExtractor import QNetwork
+from app.common.Settings import Settings
 
 Transition = namedtuple('Transition', ('state', 'action', 'reward', 'next_state', 'done'))
 
@@ -28,6 +31,8 @@ class ReplayBuffer:
     def __init__(self, capacity=700000, chunk_size=5000):
         self.buffer = deque(maxlen=capacity)
         self.chunk_size = chunk_size
+        # internal counter to track how many new transitions since last on-disk save
+        self._since_last_save = 0
         # try load existing saved transitions
         isload = True
         if isload:
@@ -35,17 +40,31 @@ class ReplayBuffer:
         atexit.register(self.save)
 
     def push(self, *args):
+        """Append a transition and save to disk every chunk_size new transitions.
+
+        Uses an internal counter so we only save when new data has been added since
+        the last save. This avoids repeatedly saving identical data when the buffer
+        is full and older items are being dropped.
+        """
         self.buffer.append(Transition(*args))
-        if len(self.buffer) % 1000 == 0:
-            print(f'Replay Buffer has {len(self.buffer)} transitions now')
-        # periodic save (keeps only latest chunk in a new file)
-        if len(self.buffer) % self.chunk_size == 0:
+        # progress log
+        if self._since_last_save % 1000 == 0:
+            print(f'Replay Buffer has got {self._since_last_save} more transitions now')
+
+        # increase counter of new transitions since last save
+        self._since_last_save += 1
+
+        # save when we've accumulated chunk_size new transitions
+        if self._since_last_save >= self.chunk_size:
             try:
                 saved = self.save()
                 if saved:
-                    print(f'Saved latest replay chunk to transitions directory')
+                    print(f'Saved latest replay chunk {saved} to transitions directory')
             except Exception as e:
                 print(f'Failed to save replay buffer due to an error: {e}')
+            finally:
+                # reset counter regardless of save success to avoid tight retry loops
+                self._since_last_save = 0
 
     def sample(self, batch_size):
         return random.sample(self.buffer, batch_size)
@@ -89,18 +108,17 @@ class ReplayBuffer:
         """
         Load all saved chunk files from transitions_dir (sorted by filename)
         into the deque. Also fallback to legacy single-file path if present.
+        后读入的内容覆盖前面的内容，保证buffer里是最新的transition。
         """
         loaded = 0
-        # First, try legacy single file for backward compatibility
+        # 先清空buffer，保证不会混入旧数据
+        self.buffer.clear()
+        # 先加载legacy文件（最旧）
         try:
             if os.path.exists(self.legacy_filepath):
                 try:
                     data = torch.load(self.legacy_filepath)
-                    # legacy file might be a deque or list
-                    if isinstance(data, deque):
-                        items = list(data)
-                    else:
-                        items = list(data)
+                    items = list(data) if not isinstance(data, deque) else list(data)
                     for t in items:
                         self.buffer.append(t)
                     loaded += len(items)
@@ -110,7 +128,7 @@ class ReplayBuffer:
         except Exception:
             pass
 
-        # Then load all chunk files from transitions directory
+        # 再加载chunk文件（按时间顺序，后面的覆盖前面的）
         try:
             if os.path.isdir(self.transitions_dir):
                 files = [f for f in os.listdir(self.transitions_dir) if f.endswith('.pkl')]
@@ -119,10 +137,14 @@ class ReplayBuffer:
                     fpath = os.path.join(self.transitions_dir, fname)
                     try:
                         data = torch.load(fpath)
-                        # data should be a list of Transition
+                        # 追加新数据
                         for t in data:
                             self.buffer.append(t)
                         loaded += len(data)
+                        # 如果超出容量，保留最新的
+                        if self.buffer.maxlen is not None and len(self.buffer) > self.buffer.maxlen:
+                            # deque自动丢弃最旧的，无需手动裁剪
+                            pass
                     except EOFError as e:
                         print(f'Failed to load {fpath} due to EOFError: {e}')
                     except Exception as e:
@@ -134,15 +156,16 @@ class ReplayBuffer:
 
 
 class DQNTrainer:
-    def __init__(self, brain: SmartBrain1, gamma=0.996, lr=1e-3, batch_size=2048, target_update=1500):
+    def __init__(self, brain: MemoryBrain, gamma=Settings.gamma, lr=Settings.lr, batch_size=Settings.batch_size, target_update=Settings.target_update):
         self.brain = brain
         self.device = brain.device
         self.policy_net = brain.net
         # self.target_net = QNetwork(num_actions=len(Action), bullet_num=10, bullet_feat_dim=32).to(self.device)
-        self.target_net = LinearNet(
-            256,
+        self.target_net = LinearNetv2(
             512,
+            256,
             128,
+            64,
             bullet_num=10,
             num_actions=len(Action)
         ).to(self.device)
@@ -234,37 +257,51 @@ class DQNTrainer:
             'boss_vely': torch.tensor([o['boss_vely'] for o in obs_list], dtype=torch.float32, device=self.device),
             # nearest_bullets may be a list of numpy arrays; convert once to a single numpy array to avoid
             # the slow path of creating a tensor from a list of ndarrays (warned by PyTorch).
-            'nearest_bullets': self._nearest_bullets_tensor([o['nearest_bullets'] for o in obs_list]),
+            'nearest_bullets': self._nearest_bullets_tensor2([o['nearest_bullets'] for o in obs_list]),
         }
 
-    def _nearest_bullets_tensor(self, nb_list):
-        """Convert a list of nearest_bullets (possibly numpy arrays) to a single torch tensor on device.
+    # def _nearest_bullets_tensor(self, nb_list):
+    #     """Convert a list of nearest_bullets (possibly numpy arrays) to a single torch tensor on device.
+    #
+    #     Accepts: nb_list: list of arrays or lists, shape per-item = (bullet_num, bullet_feat_dim)
+    #     Returns: torch.FloatTensor of shape (batch, bullet_num, bullet_feat_dim) on self.device
+    #     """
+    #     # Fast path: if already a numpy array
+    #     if isinstance(nb_list, np.ndarray):
+    #         arr = nb_list
+    #     else:
+    #         # Try to stack into a numpy array. Use dtype float32 for compatibility with torch.float32.
+    #         try:
+    #             arr = np.array(nb_list, dtype=np.float32)
+    #         except Exception:
+    #             # Last-resort: build with python list comprehension and explicit conversion
+    #             arr = np.stack([np.array(x, dtype=np.float32) for x in nb_list], axis=0)
+    #
+    #     # Ensure dtype float32
+    #     if arr.dtype != np.float32:
+    #         try:
+    #             arr = arr.astype(np.float32)
+    #         except Exception:
+    #             arr = arr.astype(np.float32, copy=False)
+    #
+    #     # Convert to torch tensor and move to device
+    #     try:
+    #         t = torch.from_numpy(arr).to(self.device)
+    #     except Exception:
+    #         # Fallback: create tensor from list (slower), but keep dtype/device consistent
+    #         t = torch.tensor(arr, dtype=torch.float32, device=self.device)
+    #     return t
 
-        Accepts: nb_list: list of arrays or lists, shape per-item = (bullet_num, bullet_feat_dim)
-        Returns: torch.FloatTensor of shape (batch, bullet_num, bullet_feat_dim) on self.device
-        """
-        # Fast path: if already a numpy array
-        if isinstance(nb_list, np.ndarray):
-            arr = nb_list
-        else:
-            # Try to stack into a numpy array. Use dtype float32 for compatibility with torch.float32.
-            try:
-                arr = np.array(nb_list, dtype=np.float32)
-            except Exception:
-                # Last-resort: build with python list comprehension and explicit conversion
-                arr = np.stack([np.array(x, dtype=np.float32) for x in nb_list], axis=0)
+    def _nearest_bullets_tensor2(self, nb_list):
+        """Convert list of nearest_bullets (shape=(bullet_num,5)) to (batch, bullet_num,7)"""
+        # 用智能体的函数统一处理
+        processed = []
+        for bullets in nb_list:
+            # TODO: 检测特征是否已经是7维，如果是就跳过，如果不是就转化一次并**写入原来的地方**
+            bullets_7d = self.brain.augment_bullet_features(bullets)
+            processed.append(bullets_7d)
 
-        # Ensure dtype float32
-        if arr.dtype != np.float32:
-            try:
-                arr = arr.astype(np.float32)
-            except Exception:
-                arr = arr.astype(np.float32, copy=False)
-
-        # Convert to torch tensor and move to device
-        try:
-            t = torch.from_numpy(arr).to(self.device)
-        except Exception:
-            # Fallback: create tensor from list (slower), but keep dtype/device consistent
-            t = torch.tensor(arr, dtype=torch.float32, device=self.device)
+        arr = np.stack(processed, axis=0).astype(np.float32)
+        t = torch.from_numpy(arr).to(self.device)
         return t
+

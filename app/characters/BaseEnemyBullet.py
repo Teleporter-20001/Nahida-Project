@@ -13,6 +13,8 @@ class BaseEnemyBullet(BaseChar):
             vy: float=0,
             target_size: tuple[int, int]=(-1, -1)
     ):
+        if target_size == (-1, -1):
+            target_size = (2*radius, 2*radius)
         super().__init__(x, y, radius, img_path, vx, vy, target_size)
         self.age = 0    # the age is measured by num of past frames
 
