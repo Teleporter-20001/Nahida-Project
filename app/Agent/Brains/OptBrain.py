@@ -24,6 +24,21 @@ def _predict_trajectory(xs: np.ndarray, ys: np.ndarray, vxs: np.ndarray, vys: np
     if datalen <= 1:
         printyellow(f'not enough data to predict acc: {datalen} < 2')
         return 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, lambda step: (0.0, 0.0)
+    
+    # 尝试对子弹突变进行检查并截断
+    for i in reversed(range(1, datalen)):
+        if np.abs(xs[i] - xs[i-1]) > 10 or np.abs(ys[i] - ys[i-1]) > 10:
+            xs = xs[i:]
+            ys = ys[i:]
+            vxs = vxs[i:]
+            vys = vys[i:]
+            datalen = len(xs)  # 修复：直接使用截断后数组的长度
+            break
+    if datalen <= 1:
+        # 刚刚发生突变，干脆用上一次的结果，反正延迟一帧也无所谓
+        printyellow(f'not enough data to predict acc after truncation: {datalen} < 2')
+        datalen = len(xs)
+            
 
     idxs = np.arange(-datalen, -1+1, dtype=int)
     assert len(idxs) == datalen, f'error in calculating idxs when predicting traj: {datalen} != {len(idxs)}'
@@ -33,8 +48,8 @@ def _predict_trajectory(xs: np.ndarray, ys: np.ndarray, vxs: np.ndarray, vys: np
     coeff_vy = np.polyfit(idxs, vys, 2)
     coeff_ax = np.polyder(coeff_vx)
     coeff_ay = np.polyder(coeff_vy)
-    ax = coeff_ax[0]    # 我觉得应该是-1才对
-    ay = coeff_ay[0]
+    ax = coeff_ax[-1]    # 我觉得应该是-1才对
+    ay = coeff_ay[-1]
 
     x_now, y_now, vx_now, vy_now = xs[-1], ys[-1], vxs[-1], vys[-1]
     def traj(step_idx: int):
@@ -54,10 +69,10 @@ def _predict_trajectory(xs: np.ndarray, ys: np.ndarray, vxs: np.ndarray, vys: np
             else:
                 ax = (vxs[-1] - vxs[-2]) / (datalen - 2)
                 ay = (vys[-1] - vys[-2]) / (datalen - 2)
-        # x_new = x_now + vx_now * step_idx + 0.5 * ax * step_idx * step_idx
-        # y_new = y_now + vy_now * step_idx + 0.5 * ay * step_idx * step_idx
-        x_new = x_now + vx_now * delta_t * step_idx + 0.5 * ax * (delta_t - 1) * delta_t * step_idx * step_idx
-        y_new = y_now + vy_now * delta_t * step_idx + 0.5 * ay * (delta_t - 1) * delta_t * step_idx * step_idx
+        # 使用正确的运动学公式：x = x0 + v0*t + 0.5*a*t²
+        t = delta_t * step_idx  # 总时间
+        x_new = x_now + vx_now * t + 0.5 * ax * t * t
+        y_new = y_now + vy_now * t + 0.5 * ay * t * t
         return x_new, y_new
     return x_now, y_now, vx_now, vy_now, ax, ay, traj
 

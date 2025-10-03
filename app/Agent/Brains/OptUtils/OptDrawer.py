@@ -11,8 +11,9 @@ from app.common.utils import printgreen, printred, printyellow
 def _get_traj(x0, y0, vx0, vy0, ax, ay):
     def traj(step):
         dt = 1.0 / Settings.FPS
-        x = x0 + vx0 * dt * step + 0.5 * ax * (dt - 1) * dt * step * step
-        y = y0 + vy0 * dt * step + 0.5 * ay * (dt - 1) * dt * step * step
+        t = dt * step  # 总时间
+        x = x0 + vx0 * t + 0.5 * ax * t * t
+        y = y0 + vy0 * t + 0.5 * ay * t * t
         return x, y
     return traj
 
@@ -147,7 +148,7 @@ class OptDrawer:
         if self._process is not None and self._process.is_alive():
             printyellow('OptDrawer: debug window already running')
             return
-        self._queue = mp.Queue()
+        self._queue = mp.Queue(maxsize=4)
         self._process = mp.Process(target=_window_process_main, args=(self._queue, self.predict_len), daemon=True)
         self._process.start()
         printgreen('OptDrawer: debug window started')
