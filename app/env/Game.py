@@ -26,6 +26,8 @@ class Game:
         Returns cumulative reward for the episode.
         """
         state = self.env.reset()
+        if hasattr(agent, 'reset_hidden_state'):
+            agent.reset_hidden_state()
         total_reward = 0.0
 
         for step in range(max_steps):
