@@ -1,3 +1,4 @@
+import numbers
 from collections.abc import Callable
 from typing import Optional
 import numpy as np
@@ -68,14 +69,29 @@ def _window_process_main(queue: mp.Queue, predict_len: int):
                 pygame.draw.circle(screen, (0, 0, 90), (int(traj_x + player_x), int(traj_y + player_y)), 5)
 
             # Draw bullets
-            for (bx, by, bvx, bvy, bax, bay) in bullets:
+            for (bx, by, bvx, bvy, bax, bay, br) in bullets:
                 if np.hypot(bx, by) < 6: 
                     continue  # too close to player, must be a zero initial value
-                pygame.draw.circle(screen, (255, 0, 0), (int(bx + player_x), int(by + player_y)), 13)
-                btraj = _get_traj(bx, by, bvx, bvy, bax, bay)
-                for i in range(1, predict_len):
-                    traj_x, traj_y = btraj(i)
-                    pygame.draw.circle(screen, (90, 0, 0), (int(traj_x + player_x), int(traj_y + player_y)), 4)
+                if not isinstance(br, numbers.Number):
+                    printred(f'invalid bullet radius: {br}, type: {type(br)}')
+                    continue
+                try:
+                    # Convert br to integer for pygame.draw.circle
+                    # Handle various number types safely by converting to numpy array first
+                    br_array = np.array(br)
+                    br_scalar = br_array.item()  # extract scalar value safely
+                    br_int = int(br_scalar)
+                    if br_int <= 0:
+                        continue  # skip invalid radius
+                    pygame.draw.circle(screen, (255, 0, 0), (int(bx + player_x), int(by + player_y)), br_int)
+                    btraj = _get_traj(bx, by, bvx, bvy, bax, bay)
+                    for i in range(1, predict_len):
+                        traj_x, traj_y = btraj(i)
+                        traj_br_int = max(1, br_int // 3)  # ensure minimum radius of 1
+                        pygame.draw.circle(screen, (90, 0, 0), (int(traj_x + player_x), int(traj_y + player_y)), traj_br_int)
+                except (TypeError, ValueError, OverflowError, AttributeError) as e:
+                    printred(f'Error converting bullet radius to int: {br} (type: {type(br)}), error: {e}')
+                    continue
 
         pygame.display.update()
         clock.tick(Settings.FPS)
@@ -106,7 +122,7 @@ class OptDrawer:
         self.boss_vy = 0.0
         self.boss_ax = 0.0
         self.boss_ay = 0.0
-        self.bullets: list[tuple[float, float, float, float, float, float]] = []  # list of (x, y, vx, vy, ax, ay)
+        self.bullets: list[tuple[float, float, float, float, float, float, float]] = []  # list of (x, y, vx, vy, ax, ay, r)
         self.predict_len: int = 10
         
         self._queue: Optional[mp.Queue] = None # pass data to subprocess to draw debug info
@@ -127,11 +143,11 @@ class OptDrawer:
         self.boss_ax = ax
         self.boss_ay = ay
         
-    def write_bullet_data(self, idx: int, x: float, y: float, vx: float, vy: float, ax: float, ay: float, traj: Callable[[int], tuple[float, float]]):
+    def write_bullet_data(self, idx: int, x: float, y: float, vx: float, vy: float, ax: float, ay: float, r: int):
         if idx >= len(self.bullets):
             printyellow(f'bullet idx {idx} out of range {len(self.bullets)}, extend bullets list')
-            self.bullets.extend([(0.0, 0.0, 0.0, 0.0, 0.0, 0.0)] * (idx - len(self.bullets) + 1))
-        self.bullets[idx] = (x, y, vx, vy, ax, ay)
+            self.bullets.extend([(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)] * (idx - len(self.bullets) + 1))
+        self.bullets[idx] = (x, y, vx, vy, ax, ay, r)
 
     def draw(self):
         """Call this function in each frame to push data to subprocess and update the debug window
