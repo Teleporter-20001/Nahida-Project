@@ -26,7 +26,7 @@ class Settings:
     window_background_color: pygame.color.Color = pygame.Color(80, 160, 150)
 
     # related to reward
-    alive_reward: float = 0.035
+    alive_reward: float = 0.055
     BORDER_BUFFER: int = 60
     BORDER_PUNISH: float = -0.4
     hit_reward: float = 0.6
@@ -37,16 +37,19 @@ class Settings:
     # related to training
     batch_size: int = 256
     gamma: float = 0.991
-    lr: float = 1e-4
+    lr: float = 1e-5
     target_update: int = 1500
     net_name = 'RecurrentQNet'
-    # --------------------
+
+    # related to training control
     render: bool = True
     begin_episode: int = 0
     epsilon_begin: float = 1.0
     epsilon_end: float = 0.001
-    epsilon_decay: float = 0.993
-    repeat_period: int = 500
+    epsilon_decay: float = 0.9999
+    repeat_period: int = 30000
+    save_model_period: int = 100
+    save_training_curve_period: int = 50
     teach_mode: bool = False
 
     # singleton instance

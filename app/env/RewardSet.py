@@ -37,6 +37,10 @@ class RewardSet:
     def value(self):
         return self.survive_reward + self.edge_reward + self.hit_reward + self.kill_reward + self.behit_reward + self.avoid_reward
 
+    @property
+    def attrs(self):
+        return self.survive_reward, self.edge_reward, self.hit_reward, self.kill_reward, self.behit_reward, self.avoid_reward
+
     def __add__(self, other):
         if not isinstance(other, RewardSet):
             return NotImplemented

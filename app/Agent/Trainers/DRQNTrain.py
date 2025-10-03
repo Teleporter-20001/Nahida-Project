@@ -20,7 +20,7 @@ Transition = namedtuple('Transition', ('state', 'action', 'reward', 'next_state'
 
 
 class SeqReplayBuffer(ReplayBuffer):
-    def __init__(self, capacity=300000, chunk_size=5000, seq_len=10):
+    def __init__(self, capacity=120000, chunk_size=10000, seq_len=10):
         super().__init__(capacity, chunk_size)
         self.seq_len = seq_len
 
@@ -92,7 +92,7 @@ class SeqReplayBuffer(ReplayBuffer):
         for s in starts:
             # 把全局索引 s 换算到 buffer 内部索引
             offset = s - self._start_index
-            seq = [self.buffer[offset + j] for j in range(self.seq_len)]
+            seq = [self.buffer[(offset + j) % self.buffer.maxlen] for j in range(self.seq_len)]
             batch.append(seq)
         return batch
 
@@ -106,7 +106,7 @@ class SeqReplayBuffer(ReplayBuffer):
 
 class DRQNTrainer:
     
-    def __init__(self, brain: MemoryBrainV2, seq_len: int, gamma=Settings.gamma, lr=Settings.gamma, batch_size=Settings.batch_size, target_update=Settings.target_update):
+    def __init__(self, brain: MemoryBrainV2, seq_len: int, gamma=Settings.gamma, lr=Settings.lr, batch_size=Settings.batch_size, target_update=Settings.target_update):
 
         self.brain = brain
         self.device = brain.device

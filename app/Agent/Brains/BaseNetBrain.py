@@ -1,10 +1,15 @@
 import torch
+from typing import cast
+
 from app.Agent.Brains.BaseBrain import BaseBrain
 from app.Agent.DataStructure import State, Action
+from app.common.Debugger import Debugger
 from app.common.utils import printgreen, printred
 
 
 class BaseNetBrain(BaseBrain):
+    
+    net: torch.nn.Module
     
     def __init__(self, be_teached=False):
         super().__init__()
@@ -13,12 +18,16 @@ class BaseNetBrain(BaseBrain):
         printgreen(f'using device: {self.device}')
         self._create_network()
         self._hidden_state = torch.zeros(1, 1, 512, device=self.device)
-        
+
+
     def _create_network(self):
         """子类需实现此方法以创建网络"""
-        self.net: torch.nn.Module | None = None
+        # self.net: torch.nn.Module | None = None
 
         raise NotImplementedError("_create_network 方法未被实现")
+    
+    def reset_hidden_state(self, batch_size=1):
+        self._hidden_state = torch.zeros(1, batch_size, 512, device=self.device)
     
     def decide_action(self, state: State) -> Action:
 
@@ -47,12 +56,16 @@ class BaseNetBrain(BaseBrain):
             }
 
             q_values, self._hidden_state = self.net(obs_tensor, self._hidden_state)  # (1, num_actions) and hidden state
-            temperature = 2.0
+            temperature = 0.3
             weights = torch.softmax(q_values / temperature, dim=-1, dtype=torch.float32)
+            Debugger.instance().add_data(weights)
             try:
-                action_idx: int = torch.multinomial(weights, num_samples=1).item()
+                action_idx: int = cast(int, torch.multinomial(weights, num_samples=1).item())
                 # action_idx = q_values.argmax(dim=1).item()
             except AttributeError as e:
                 printred(f'An error occured while determining action: {e}')
                 raise
             return list(Action)[action_idx]
+
+    def __del__(self):
+        Debugger.instance().stop_window()

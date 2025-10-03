@@ -1,17 +1,23 @@
 import os
+import time
 
 import numpy as np
 import pygame
 import sys
 import torch
+from PyQt5 import QtWidgets
 
 from tqdm import tqdm
 
 from app.Agent.Trainers.DRQNTrain import DRQNTrainer
 from app.common.ProcessDrawer import ProcessDrawer
 from app.common.Settings import Settings
+from app.common.utils import printyellow
 from app.env.RewardSet import RewardSet
 from app.env.TouhouEnv import TouhouEnv
+
+# TODO: 检查这玩意的必要性
+miniapp = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
 
 class GameTrainer:
     """Game loop for training with DQN"""
@@ -19,13 +25,28 @@ class GameTrainer:
     def __init__(self, env: TouhouEnv, trainer: DRQNTrainer):
         self.env = env
         self.trainer = trainer  # DQNTrainer
+        self.process_drawer = ProcessDrawer(
+            title='Episode Rewards',
+            xlabel='episode',
+            labels=['Total', 'survive', 'edge', 'hit', 'kill', 'behit', 'avoid'],
+            step_title='Accumulative step rewards in 1 episode',
+            step_xlabel='steps',
+            step_labels=['Total', 'survive', 'edge', 'hit', 'kill', 'behit', 'avoid']
+        )
 
     def run_training_episode(self, max_steps: int = 100000, render: bool = True, epsilon=0.1) -> RewardSet:
         """Run one episode with training (DQN)"""
         state = self.env.reset()
+        try:
+            self.trainer.brain.reset_hidden_state()
+        except AttributeError:
+            printyellow("Warning: brain has no method 'reset_hidden_state'")
         total_reward_set = RewardSet()
+        self.process_drawer.clear_steps()
 
         for step in range(max_steps):
+            # Qt event process
+            miniapp.processEvents()
             # pygame 事件处理
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
@@ -83,14 +104,15 @@ class GameTrainer:
             if done:
                 break
 
+            self.process_drawer.add_1_step_data(step, total_reward_set.value, *total_reward_set.attrs)
+            if step % 20 == 0:
+                self.process_drawer.update()
+
         return total_reward_set
 
     def train(self, episodes: int):
         # print(f'current dir: {os.getcwd()}')
-        process_drawer = ProcessDrawer(
-            title='Rewards',
-            labels=['Total', 'survive', 'edge', 'hit', 'kill', 'behit', 'avoid'],
-        )
+
         settings_server = Settings()
         begin_episode = Settings.begin_episode
         # ----- normal params -----
@@ -107,20 +129,22 @@ class GameTrainer:
 
             for episode in range(episodes):
 
-                # epsilon = max(Settings.epsilon_end, Settings.epsilon_begin * Settings.epsilon_decay ** (episode % Settings.repeat_period))
+                epsilon = max(Settings.epsilon_end, Settings.epsilon_begin * Settings.epsilon_decay ** (episode % Settings.repeat_period))
                 # epsilon = Settings.epsilon_begin - (Settings.epsilon_begin - Settings.epsilon_end) * ((episode % repeat_period) / repeat_period)
-                epsilon = Settings.epsilon_end + 0.5 * (Settings.epsilon_begin - Settings.epsilon_end) * (1 + np.cos(np.pi * (episode % repeat_period) / repeat_period))
+                # epsilon = Settings.epsilon_end + 0.5 * (Settings.epsilon_begin - Settings.epsilon_end) * (1 + np.cos(np.pi * (episode % repeat_period) / repeat_period))
                 assert 0 <= epsilon <= 1, f'invalid epsilon: {epsilon}'
+                t1 = time.time()
                 rewards = self.run_training_episode(render=Settings.render, epsilon=epsilon)
+                t2 = time.time()
 
-                print(f"Episode {episode} finished, epsilon={epsilon:.6f}, reward={rewards.value:.3f}")
+                print(f"Episode {episode} finished, epsilon={epsilon:.6f}, reward={rewards.value:.3f}, timecast={t2-t1:.3f}s")
                 try:
                     reward_file.write(f"{episode},{epsilon},{rewards.value},{rewards.survive_reward},{rewards.edge_reward},{rewards.hit_reward},{rewards.kill_reward},{rewards.behit_reward},{rewards.avoid_reward}\n")
-                    process_drawer.add_data(episode, rewards.value, rewards.survive_reward, rewards.edge_reward, rewards.hit_reward, rewards.kill_reward, rewards.behit_reward, rewards.avoid_reward)
-                    process_drawer.update()
+                    self.process_drawer.add_1_episode_data(episode, rewards.value, rewards.survive_reward, rewards.edge_reward, rewards.hit_reward, rewards.kill_reward, rewards.behit_reward, rewards.avoid_reward)
+                    self.process_drawer.update()
                 except Exception as error:
                     print(f"Error writing reward to file: {error}")
-                if episode % 25 == 0 and episode:
+                if episode % Settings.save_model_period == 0 and episode:
                     save_dir = os.path.join('Agent', 'models')
                     try:
                         if not os.path.exists(save_dir):
@@ -147,3 +171,6 @@ class GameTrainer:
                     torch.save(self.trainer.policy_net.state_dict(), save_path)
                 except Exception as e:
                     print(f"Error saving model: {e}")
+
+
+
