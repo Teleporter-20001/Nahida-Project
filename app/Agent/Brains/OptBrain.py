@@ -25,7 +25,7 @@ def _predict_trajectory(xs: np.ndarray, ys: np.ndarray, vxs: np.ndarray, vys: np
     
     datalen = len(xs)
     # assert datalen >= 2, f'not enough data to predict acc: {datalen} < 2'
-    if datalen <= 2:
+    if datalen < 2:
         printyellow(f'not enough data to predict acc: {datalen} < 2')
         return 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, lambda step: (0.0, 0.0)
     
@@ -38,22 +38,28 @@ def _predict_trajectory(xs: np.ndarray, ys: np.ndarray, vxs: np.ndarray, vys: np
             vys = vys[i:]
             datalen = len(xs)  # 修复：直接使用截断后数组的长度
             break
-    if datalen <= 2:
+    
+    if datalen == 2:
+        dt = 1.0 / Settings.FPS
+        ax = (vxs[-1] - vxs[-2]) / dt
+        ay = (vys[-1] - vys[-2]) / dt
+    elif datalen < 2:
         # 刚刚发生突变，干脆用上一次的结果，反正延迟一帧也无所谓
         printyellow(f'not enough data to predict acc after truncation: {datalen} < 2')
-        datalen = len(xs)
-            
+        # datalen = len(xs)
+        return 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, lambda step: (0.0, 0.0)
+    else:
+        dt = 1.0 / Settings.FPS
+        times = np.arange(-datalen * dt, (-1+1) * dt, step=dt, dtype=np.float32)
+        assert len(times) == datalen, f'error in calculating times when predicting traj: {datalen} != {len(times)}'
 
-    idxs = np.arange(-datalen, -1+1, dtype=int)
-    assert len(idxs) == datalen, f'error in calculating idxs when predicting traj: {datalen} != {len(idxs)}'
-
-    ax, ay = None, None
-    coeff_vx = np.polyfit(idxs, vxs, 2)
-    coeff_vy = np.polyfit(idxs, vys, 2)
-    coeff_ax = np.polyder(coeff_vx)
-    coeff_ay = np.polyder(coeff_vy)
-    ax = coeff_ax[-1]    # 我觉得应该是-1才对
-    ay = coeff_ay[-1]
+        ax, ay = None, None
+        coeff_vx = np.polyfit(times, vxs, 2)
+        coeff_vy = np.polyfit(times, vys, 2)
+        coeff_ax = np.polyder(coeff_vx)
+        coeff_ay = np.polyder(coeff_vy)
+        ax = coeff_ax[-1]    # 我觉得应该是-1才对
+        ay = coeff_ay[-1]
 
     x_now, y_now, vx_now, vy_now = xs[-1], ys[-1], vxs[-1], vys[-1]
     def traj(step_idx: int):
