@@ -22,7 +22,7 @@ class MemoryBrain(BaseBrain):
             256,
             128,
             64,
-            bullet_num=10,
+            bullet_num=Settings.consider_bullets_num,
             num_actions=len(Action)
         ).to(self.device)
 
@@ -66,7 +66,7 @@ class MemoryBrain(BaseBrain):
             return obs.get('human_action', Action.LEFTUP)
 
         # 当前子弹信息
-        cur_bullets = np.array(obs['nearest_bullets'], dtype=np.float32)  # (k,5), k=10
+        cur_bullets = np.array(obs['nearest_bullets'], dtype=np.float32)  # (k,5), k=10(Settings.consider_bullets_num)
         prev_bullets = self.bullet_history[-1] if len(self.bullet_history) > 0 else np.zeros_like(cur_bullets)
 
         # 构造增强特征

@@ -20,18 +20,20 @@ def _predict_trajectory(xs: np.ndarray, ys: np.ndarray, vxs: np.ndarray, vys: np
     """
     assert len(xs) == len(ys) == len(vxs) == len(vys), f'invalid predict input length - xs: {len(xs)}, ys: {len(ys)}, vxs: {len(vxs)}, vys: {len(vys)}'
     # avoid none bullet
-    if len(xs) > 0 and (np.abs(xs[-1]) < 10 or np.abs(ys[-1]) < 10):
+    if len(xs) > 0 and np.hypot(xs[-1], ys[-1]) < 9:
         return 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, lambda step: (0.0, 0.0)
     
     datalen = len(xs)
     # assert datalen >= 2, f'not enough data to predict acc: {datalen} < 2'
     if datalen < 2:
-        printyellow(f'not enough data to predict acc: {datalen} < 2')
+        # printyellow(f'not enough data to predict acc: {datalen} < 2')
         return 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, lambda step: (0.0, 0.0)
     
     # 尝试对子弹突变进行检查并截断
+    MAX_SPEED = 1000.0  # 每帧最大速度，超过这个速度就认为是突变
+    MAX_MOVEMENT_PER_FRAME = MAX_SPEED / Settings.FPS  # 每帧最大移动距离
     for i in reversed(range(1, datalen)):
-        if np.abs(xs[i] - xs[i-1]) > 10 or np.abs(ys[i] - ys[i-1]) > 10:
+        if np.hypot(xs[i] - xs[i-1], ys[i] - ys[i-1]) > MAX_MOVEMENT_PER_FRAME:
             xs = xs[i:]
             ys = ys[i:]
             vxs = vxs[i:]
@@ -45,8 +47,8 @@ def _predict_trajectory(xs: np.ndarray, ys: np.ndarray, vxs: np.ndarray, vys: np
         ay = (vys[-1] - vys[-2]) / dt
     elif datalen < 2:
         # 刚刚发生突变，干脆用上一次的结果，反正延迟一帧也无所谓
-        printyellow(f'not enough data to predict acc after truncation: {datalen} < 2')
-        # datalen = len(xs)
+        # printyellow(f'not enough data to predict acc after truncation: {datalen} < 2')
+
         return 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, lambda step: (0.0, 0.0)
     else:
         dt = 1.0 / Settings.FPS

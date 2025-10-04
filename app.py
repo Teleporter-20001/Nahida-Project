@@ -18,7 +18,7 @@ if __name__ == '__main__':
         # settings = Settings()
         env = TouhouEnv(Settings)
         game: Game = Game(env)
-        agent: BaseBrain = OptBrain(memory_len=8, predict_len=60)
+        agent: BaseBrain = OptBrain(memory_len=10, predict_len=30)
         once_reward = game.run_episode(agent, max_steps=100000, render=True)
         env._terminated = True
         env.close()
@@ -34,7 +34,7 @@ if __name__ == '__main__':
         try:
             # settings: Settings = Settings()
             env = TouhouEnv(Settings)
-            trainer = DRQNTrainer(MemoryBrainV2(be_teached=Settings.teach_mode), 10)
+            trainer = DRQNTrainer(MemoryBrainV2(be_teached=Settings.teach_mode), Settings.consider_bullets_num)
             game: GameTrainer = GameTrainer(env, trainer)
             # game.optimize_network(1200001)
             game.train(Settings.repeat_period + 1)

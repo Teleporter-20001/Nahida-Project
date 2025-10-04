@@ -145,7 +145,8 @@ class OptDrawer:
         
     def write_bullet_data(self, idx: int, x: float, y: float, vx: float, vy: float, ax: float, ay: float, r: int):
         if idx >= len(self.bullets):
-            printyellow(f'bullet idx {idx} out of range {len(self.bullets)}, extend bullets list')
+            if idx >= Settings.consider_bullets_num:
+                printred(f'bullet idx {idx} out of range {len(self.bullets)} with limit {Settings.consider_bullets_num}, extend bullets list')
             self.bullets.extend([(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)] * (idx - len(self.bullets) + 1))
         self.bullets[idx] = (x, y, vx, vy, ax, ay, r)
 

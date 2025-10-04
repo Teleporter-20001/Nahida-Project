@@ -25,6 +25,8 @@ class Settings:
     window_height: int = 800
     window_background_color: pygame.color.Color = pygame.Color(80, 160, 150)
 
+    consider_bullets_num: int = 10
+
     # related to reward
     alive_reward: float = 0.055
     BORDER_BUFFER: int = 60

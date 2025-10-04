@@ -21,7 +21,7 @@ class SmartBrain1(BaseBrain):
             256,
             128,
             64,
-            bullet_num=10,
+            bullet_num=Settings.consider_bullets_num,
             num_actions=len(Action)
         ).to(self.device)
         self.model_path = os.path.join('Agent', 'models', f'LinearNet_{Settings.begin_episode}.pth')
