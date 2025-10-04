@@ -4,6 +4,8 @@ from multiprocessing import Process, Manager
 
 import numpy as np
 
+from app.characters.Nahida import Nahida
+
 # Try to import scipy optimization functions
 try:
     from scipy.optimize import minimize, differential_evolution
@@ -15,7 +17,7 @@ from app.Agent.Brains.BaseBrain import BaseBrain
 from app.Agent.Brains.OptUtils.OptDrawer import OptDrawer
 from app.Agent.DataStructure import State, Action
 from app.common.Settings import Settings
-from app.common.utils import printred, printyellow
+from app.common.utils import printgreen, printred, printyellow
 
 
 def _predict_trajectory(xs: np.ndarray, ys: np.ndarray, vxs: np.ndarray, vys: np.ndarray) -> tuple[float, float, float, float, float, float, Callable[[int], tuple[float, float]]]:
@@ -134,10 +136,15 @@ class OptBrain(BaseBrain):
         self._bullets_waypoints_calced: bool = False  # 标记子弹轨迹点是否已经计算过，避免重复计算
         self._boss_waypoints: np.ndarray = np.zeros((predict_len, 2), dtype=np.float32)  # 记录boss在未来predict_len帧内的轨迹点
         self._boss_waypoints_calced: bool = False  # 标记boss轨迹点是否已经计算过，避免重复计算
-        self._rough_collision_weights: np.ndarray = np.exp(-np.linspace(0, predict_len-1, predict_len) / (predict_len / 5))  # 指数衰减的权重，用于粗略碰撞检测的加权
+        self._rough_collision_weights: np.ndarray = np.exp(-np.linspace(0, predict_len-1, predict_len) / (predict_len / 3))  # 指数衰减的权重，用于粗略碰撞检测的加权
         self._bullet_danger_zone_radius = Settings.player_radius + 15 + 15  # 粗略碰撞检测的危险区域半径
         self._last_target_pos: tuple[float, float] = (Settings.window_width / 2, Settings.window_height * 3 / 4)  # 上一帧的目标位置，初始为屏幕中央偏下
         self._target_pos: tuple[float, float] = self._last_target_pos  # 当前帧的目标位置，初始为上一帧的位置
+        
+        # for step 3
+        self.beam_width = 10  # Beam search的beam宽度
+        self.early_stop_threshold = 1e-6  # 提前停止的阈值，如果找到成本很低的解就提前停止
+        
 
     def decide_action(self, state: State) -> Action:
 
@@ -145,7 +152,8 @@ class OptBrain(BaseBrain):
         if obs is None:
             printred('error: empty observation')
             return Action.NOMOVE
-        
+
+        # ----------------------------------------------------------------------------
         # step 0: maintain memory
         player_x = obs['player_x']
         player_y = obs['player_y']
@@ -174,6 +182,7 @@ class OptBrain(BaseBrain):
         self._bullets_waypoints_calced = False  # 新的一帧，子弹轨迹点需要重新计算
         self._boss_waypoints_calced = False  # 新的一帧，boss轨迹点需要重新计算
 
+        # ----------------------------------------------------------------------------
         # opt step 1: predict boss and bullets' trajectories
         boss_traj_params = _predict_trajectory(
             np.array(self._mem_boss_xs),
@@ -206,11 +215,12 @@ class OptBrain(BaseBrain):
             r = self._mem_bullets_rads[i][-1] if len(self._mem_bullets_rads[i]) > 0 else 10
             self.debug_drawer.write_bullet_data(i, relx, rely, vx, vy, ax, ay, r)
         
+        # -------------------------------------------------------------------------
         # opt step 2: decide the best target position to go to
-        weight_prefer, weight_collision, weight_smooth = 1.0, 0.2, 0.02
+        weight_prefer, weight_collision, weight_smooth = 1.2, 0.3, 0.05
         
         # Define the combined objective function
-        def objective_function(pos):
+        def objective_function_step2(pos):
             if isinstance(pos, (list, tuple)) and len(pos) == 2:
                 target_pos = (float(pos[0]), float(pos[1]))
             else:
@@ -239,10 +249,10 @@ class OptBrain(BaseBrain):
         
         if SCIPY_AVAILABLE:
             # Use scipy optimization methods
-            self._target_pos = self._optimize_with_scipy(objective_function, bounds, player_x, player_y)
+            self._target_pos = self._optimize_with_scipy(objective_function_step2, bounds, player_x, player_y)
         else:
             # Use fallback grid search method
-            self._target_pos = self._optimize_with_grid_search(objective_function, bounds)
+            self._target_pos = self._optimize_with_grid_search(objective_function_step2, bounds)
             
         self.debug_drawer.write_target_data(self._target_pos[0], self._target_pos[1])
         
@@ -250,16 +260,36 @@ class OptBrain(BaseBrain):
         boss_abs_x = player_x + boss_from_player_x
         boss_abs_y = player_y + boss_from_player_y
         # print(f"Player: ({player_x:.1f}, {player_y:.1f}), Boss: ({boss_abs_x:.1f}, {boss_abs_y:.1f}), Target: ({self._target_pos[0]:.1f}, {self._target_pos[1]:.1f})")
-            
-        # step 3: decide action to move towards target position
-        if self._target_pos is not None:
-            pass
         
-        # step final: maintain last target pos
+        # ----------------------------------------------------------------------------
+        # step 3: decide action to move towards target position with MPC
+        if self._target_pos is None:
+            printred("error: target_pos is None, using NOMOVE")
+            return Action.NOMOVE
+        
+        # 使用Beam Search找到最优行动序列
+        try:
+            optimal_action_sequence = self._beam_search_action_sequence(
+                weight_collision=1.0,    # 避免碰撞的权重
+                weight_togoal=0.5,       # 接近目标的权重
+                weight_smooth=0.1        # 平滑性权重
+            )
+            
+            # 从最优序列中获取第一个动作
+            next_action = self._get_best_action_from_sequence(optimal_action_sequence)
+            
+            # 调试信息（可选）
+            printgreen(f"Beam search found sequence: {optimal_action_sequence[:3]}..., first action: {next_action}")
+            
+        except Exception as e:
+            printyellow(f"Beam search failed, using NOMOVE: {e}")
+            next_action = Action.NOMOVE
+        
+        # step final: maintain memories, such as last target pos
         self.debug_drawer.draw()
         self._last_target_pos = self._target_pos
             
-        return Action.NOMOVE
+        return next_action
     
     # step 2 helper functions
     def _J_goal(self, target_pos: tuple[float, float], boss_traj: Callable[[int], tuple[float, float]], bullet_trajs: list[Callable[[int], tuple[float, float]]]) -> float:
@@ -285,7 +315,7 @@ class OptBrain(BaseBrain):
         prefer_target_x = boss_target_x
         prefer_target_y = max(Settings.window_height * 3. / 4, min(boss_target_y + Settings.window_height / 2, Settings.window_height))  # prefer to stay below the boss
         
-        weight_x, weight_y = 2.0, 0.6  # x方向的权重较大，y方向的权重较小且为负，表示希望靠近boss的水平位置但保持一定的垂直距离
+        weight_x, weight_y = 2.0, 1.4  # x方向的权重较大，y方向的权重较小，表示希望靠近boss的水平位置但保持一定的垂直距离
         cost = weight_x * np.abs(prefer_target_x - target_pos[0]) + weight_y * np.abs(prefer_target_y - target_pos[1])
         return cost
     
@@ -349,7 +379,7 @@ class OptBrain(BaseBrain):
             boss_abs_y = self._current_player_y + boss_rel_y
             
             dist_to_boss = np.hypot(boss_abs_x - target_pos[0], boss_abs_y - target_pos[1])
-            z = dist_to_boss - (Settings.player_radius + Settings.boss_radius + 10)  # 留一点余量
+            z = dist_to_boss - (Settings.player_radius + Settings.boss_radius + 30)  # 留一点余量
             cost += self._rough_collision_weights[step] * phi(z)
 
         return cost
@@ -364,7 +394,18 @@ class OptBrain(BaseBrain):
         Returns:
             float: The calculated smoothness cost.
         """
-        return np.hypot(target_pos[0] - last_target_pos[0], target_pos[1] - last_target_pos[1])**2
+        def phi(z: float) -> float:
+            """Punishment function for smoothness cost.
+
+            Args:
+                z (float): The distance between current and last target positions.
+            Returns:
+                punishment: The calculated punishment cost.
+            """
+            gamma = 1.0
+            return gamma * max(0, z) ** 2  # quadratic punishment for large changes in target position
+        THRESHOLD = 600 / Settings.FPS
+        return phi(np.hypot(target_pos[0] - last_target_pos[0], target_pos[1] - last_target_pos[1]) - THRESHOLD)
 
     def _optimize_with_scipy(self, objective_function, bounds, player_x: float, player_y: float) -> tuple[float, float]:
         """Use scipy optimization methods to find the best target position.
@@ -418,7 +459,7 @@ class OptBrain(BaseBrain):
                     best_cost = result.fun
                     best_pos = (result.x[0], result.x[1])
             except Exception as e:
-                printyellow(f"Global optimization failed: {e}")
+                printred(f"Global optimization failed: {e}")
                 # Use safe fallback position
                 best_pos = (Settings.window_width / 2, Settings.window_height * 3 / 4)
         
@@ -480,6 +521,190 @@ class OptBrain(BaseBrain):
             best_pos = (Settings.window_width / 2, Settings.window_height * 3 / 4)
         
         return best_pos
+
+    # step 3 helper functions
+    def _get_action(self, idx: int) -> Action:
+        return list(Action)[idx]
+    
+    def _J_collision(self, action_seq: list[int]) -> float:
+        """Calculate the precise collision cost J for a given player position.
+
+        Args:
+            action_seq (list[int]): The sequence of actions to evaluate.
+        Returns:
+            cost: The calculated collision cost.
+        """
+        # We think that bullets' waypoints have been calculated in step 2
+        def phi(z: float) -> float:
+            gamma = 1.0
+            return gamma * max(0, -z) ** 2  # quadratic punishment for being inside the danger zone
+        cost = 0.0
+        player_pos = (self._current_player_x, self._current_player_y)
+        SAFETY_THRESH = Settings.player_radius + 15 + 15
+        for step in range(len(action_seq)):
+            _action = self._get_action(action_seq[step])
+            player_pos = tuple(np.array(player_pos) + (np.array([_action.xfactor, _action.yfactor]) * Nahida.ORIGIN_SPEED / Settings.FPS))
+            for i in range(self.consider_bullets_num):
+                bullet_rel_x, bullet_rel_y = self._bullets_waypoints[i, step, :]
+                bullet_abs_x, bullet_abs_y = self._current_player_x + bullet_rel_x, self._current_player_y + bullet_rel_y
+                z = np.hypot(bullet_abs_x - player_pos[0], bullet_abs_y - player_pos[1]) - SAFETY_THRESH
+                cost += phi(z)
+            boss_rel_x, boss_rel_y = self._boss_waypoints[step, :]
+            boss_abs_x, boss_abs_y = self._current_player_x + boss_rel_x, self._current_player_y + boss_rel_y
+            z = np.hypot(boss_abs_x - player_pos[0], boss_abs_y - player_pos[1]) - (Settings.player_radius + Settings.boss_radius + 30)
+            cost += phi(z)
+        return cost
+    
+    def _J_action_togoal(self, action_seq: list[int]) -> float:
+        """Calculate the precise cost J to encourage reaching the goal.
+
+        Args:
+            action_seq (list[int]): The sequence of actions to evaluate.
+
+        Returns:
+            float: The calculated cost to reach the goal.
+        """
+        cost = 0.0
+        player_pos = (self._current_player_x, self._current_player_y)
+        for step in range(len(action_seq)):
+            _action = self._get_action(action_seq[step])
+            player_pos = tuple(np.array(player_pos) + (np.array([_action.xfactor, _action.yfactor]) * Nahida.ORIGIN_SPEED / Settings.FPS))
+            cost += np.hypot(self._target_pos[0] - player_pos[0], self._target_pos[1] - player_pos[1]) ** 2
+        return cost
+    
+    def _J_action_smooth(self, action_seq: list[int]) -> float:
+        """Calculate the smoothness cost J for a given action sequence.
+
+        Args:
+            action_seq (list[int]): The sequence of actions to evaluate.
+        Returns:
+            cost: The calculated smoothness cost.
+        """
+        cost = 0.0
+        if len(action_seq) < 2:
+            return cost
+        for step in range(1, len(action_seq)):
+            prev_action = self._get_action(action_seq[step - 1])
+            curr_action = self._get_action(action_seq[step])
+            cost += (np.arctan2(curr_action.yfactor, curr_action.xfactor) - np.arctan2(prev_action.yfactor, prev_action.xfactor)) ** 2
+        return cost
+
+    def _beam_search_action_sequence(self, weight_collision: float = 1.0, weight_togoal: float = 0.5, weight_smooth: float = 0.1) -> list[int]:
+        """Use Beam Search to find the optimal action sequence for step 3.
+
+        Args:
+            weight_collision (float): Weight for collision cost
+            weight_togoal (float): Weight for reaching target goal cost
+            weight_smooth (float): Weight for smoothness cost
+
+        Returns:
+            list[int]: The optimal action sequence as a list of action indices
+        """
+        # 定义组合目标函数
+        def combined_cost(action_seq: list[int]) -> float:
+            """Calculate the combined cost for an action sequence."""
+            try:
+                cost_collision = self._J_collision(action_seq)
+                cost_togoal = self._J_action_togoal(action_seq)
+                cost_smooth = self._J_action_smooth(action_seq)
+                
+                total_cost = (weight_collision * cost_collision + 
+                            weight_togoal * cost_togoal + 
+                            weight_smooth * cost_smooth)
+                return total_cost
+            except Exception as e:
+                # 如果计算失败，返回一个很大的惩罚值
+                return float('inf')
+
+        # Beam Search实现
+        num_actions = len(Action)  # 9个可能的动作
+        
+        # 初始化：第一层的所有可能动作
+        # 每个beam元素是一个tuple: (action_sequence, cumulative_cost)
+        current_beams = []
+        for action_idx in range(num_actions):
+            try:
+                cost = combined_cost([action_idx])
+                if cost < float('inf'):
+                    current_beams.append(([action_idx], cost))
+            except Exception:
+                continue
+        
+        # 如果第一层就没有有效的动作，返回默认动作序列
+        if not current_beams:
+            printred("Beam search found no valid initial actions, returning NOMOVE sequence.")
+            return [list(Action).index(Action.NOMOVE) for _ in range(self.action_predict_len)]
+
+        # 按成本排序并保留前beam_width个
+        current_beams.sort(key=lambda x: x[1])
+        current_beams = current_beams[:self.beam_width]
+        
+        # 逐层扩展beam search
+        for depth in range(1, self.action_predict_len):
+            next_beams = []
+            
+            # 对当前层的每个beam进行扩展
+            for beam_seq, beam_cost in current_beams:
+                # 尝试添加每个可能的下一个动作
+                for action_idx in range(num_actions):
+                    new_seq = beam_seq + [action_idx]
+                    try:
+                        new_cost = combined_cost(new_seq)
+                        if new_cost < float('inf'):
+                            next_beams.append((new_seq, new_cost))
+                    except Exception:
+                        continue
+            
+            # 如果没有有效的扩展，使用当前最优序列并用NOMOVE填充
+            if not next_beams:
+                best_seq = current_beams[0][0]
+                while len(best_seq) < self.action_predict_len:
+                    printyellow(f"Beam search terminated early at depth {depth} due to no valid expansions.")
+                    best_seq.append(list(Action).index(Action.NOMOVE))
+                return best_seq
+            
+            # 按成本排序并保留前beam_width个
+            next_beams.sort(key=lambda x: x[1])
+            current_beams = next_beams[:self.beam_width]
+            
+            # 早期停止检查：如果找到了非常好的解，可以提前结束
+            if len(current_beams) > 0 and current_beams[0][1] < self.early_stop_threshold:
+                best_seq = current_beams[0][0]
+                while len(best_seq) < self.action_predict_len:
+                    printgreen(f"Beam search early stopping at depth {depth} with cost {current_beams[0][1]:.6f}")
+                    best_seq.append(list(Action).index(Action.NOMOVE))
+                return best_seq
+        
+        # 返回最优序列
+        if current_beams:
+            best_sequence = current_beams[0][0]
+            return best_sequence
+        else:
+            # 备用方案：返回全NOMOVE序列
+            printred("Beam search found no valid action sequences, returning NOMOVE sequence.")
+            return [list(Action).index(Action.NOMOVE) for _ in range(self.action_predict_len)]
+
+    def _get_best_action_from_sequence(self, action_sequence: list[int]) -> Action:
+        """Get the first action from the optimal action sequence.
+
+        Args:
+            action_sequence (list[int]): The optimal action sequence
+
+        Returns:
+            Action: The first action to take
+        """
+        if not action_sequence:
+            return Action.NOMOVE
+        
+        try:
+            action_idx = action_sequence[0]
+            actions_list = list(Action)
+            if 0 <= action_idx < len(actions_list):
+                return actions_list[action_idx]
+            else:
+                return Action.NOMOVE
+        except Exception:
+            return Action.NOMOVE
 
     def __del__(self):
         self.debug_drawer.stop_window()

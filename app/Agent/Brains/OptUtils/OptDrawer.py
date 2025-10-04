@@ -56,6 +56,7 @@ def _window_process_main(queue: mp.Queue, predict_len: int):
             boss_x, boss_y, boss_vx, boss_vy, boss_ax, boss_ay = data["boss"]
             bullets = data["bullets"]
             target_x, target_y = data.get("target", (None, None))
+            player_traj: list[tuple[float, float]] = data.get("player_traj", [])
             
             # Draw player
             pygame.draw.circle(screen, (127, 127, 127), (int(player_x), int(player_y)), 8)
@@ -99,6 +100,12 @@ def _window_process_main(queue: mp.Queue, predict_len: int):
                 pygame.draw.circle(screen, (0, 255, 0), (int(target_x), int(target_y)), 10, 4)
                 text_surface = font.render(f'Target: ({target_x:.1f}, {target_y:.1f})', True, (0, 128, 0))
                 screen.blit(text_surface, (10, 10))
+                
+            # Draw player trajectory
+            if player_traj:
+                player_traj.insert(0, (player_x, player_y))  # include current position
+                for i in range(1, len(player_traj)):
+                    pygame.draw.line(screen, (200, 50, 100), (int(player_traj[i-1][0]), int(player_traj[i-1][1])), (int(player_traj[i][0]), int(player_traj[i][1])), width=4)
 
         pygame.display.update()
         clock.tick(Settings.FPS // 2)
@@ -133,6 +140,7 @@ class OptDrawer:
         self.predict_len: int = 10
         self.target_x = 0.0
         self.target_y = 0.0
+        self.player_traj: list[tuple[float, float]] = []
         
         self._queue: Optional[mp.Queue] = None # pass data to subprocess to draw debug info
         self._process: Optional[mp.Process] = None
@@ -162,6 +170,9 @@ class OptDrawer:
                 printred(f'bullet idx {idx} out of range {len(self.bullets)} with limit {Settings.consider_bullets_num}, extend bullets list')
             self.bullets.extend([(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)] * (idx - len(self.bullets) + 1))
         self.bullets[idx] = (x, y, vx, vy, ax, ay, r)
+        
+    def write_player_traj(self, traj: list[tuple[float, float]]):
+        self.player_traj = traj
 
     def draw(self):
         """Call this function in each frame to push data to subprocess and update the debug window
@@ -172,6 +183,7 @@ class OptDrawer:
                 "boss": (self.boss_x, self.boss_y, self.boss_vx, self.boss_vy, self.boss_ax, self.boss_ay),
                 "bullets": self.bullets,
                 "target": (self.target_x, self.target_y),
+                "player_traj": self.player_traj
             }
             self._queue.put(data)
             
