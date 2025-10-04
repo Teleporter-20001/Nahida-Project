@@ -1,4 +1,5 @@
 import numbers
+import time
 from collections.abc import Callable
 from typing import Optional
 import numpy as np
@@ -103,12 +104,13 @@ def _window_process_main(queue: mp.Queue, predict_len: int):
                 
             # Draw player trajectory
             if player_traj:
-                player_traj.insert(0, (player_x, player_y))  # include current position
                 for i in range(1, len(player_traj)):
                     pygame.draw.line(screen, (200, 50, 100), (int(player_traj[i-1][0]), int(player_traj[i-1][1])), (int(player_traj[i][0]), int(player_traj[i][1])), width=4)
 
-        pygame.display.update()
-        clock.tick(Settings.FPS // 2)
+            pygame.display.update()
+            if Settings.save_record:
+                pygame.image.save(screen, os.path.join('data', f'debug_{time.time()}.png'))
+            clock.tick(Settings.FPS // 2)
 
 
 class OptDrawer:

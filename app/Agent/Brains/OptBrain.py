@@ -143,7 +143,7 @@ class OptBrain(BaseBrain):
         
         # for step 3
         self.beam_width = 10  # Beam search的beam宽度
-        self.early_stop_threshold = 1e-6  # 提前停止的阈值，如果找到成本很低的解就提前停止
+        self.early_stop_threshold = 10  # 提前停止的阈值，如果找到成本很低的解就提前停止
         
 
     def decide_action(self, state: State) -> Action:
@@ -217,7 +217,7 @@ class OptBrain(BaseBrain):
         
         # -------------------------------------------------------------------------
         # opt step 2: decide the best target position to go to
-        weight_prefer, weight_collision, weight_smooth = 1.2, 0.3, 0.05
+        weight_prefer, weight_collision, weight_smooth = 1.2, 0.5, 0.05
         
         # Define the combined objective function
         def objective_function_step2(pos):
@@ -270,7 +270,7 @@ class OptBrain(BaseBrain):
         # 使用Beam Search找到最优行动序列
         try:
             optimal_action_sequence = self._beam_search_action_sequence(
-                weight_collision=1.0,    # 避免碰撞的权重
+                weight_collision=4.0,    # 避免碰撞的权重
                 weight_togoal=0.5,       # 接近目标的权重
                 weight_smooth=0.1        # 平滑性权重
             )
@@ -279,8 +279,14 @@ class OptBrain(BaseBrain):
             next_action = self._get_best_action_from_sequence(optimal_action_sequence)
             
             # 调试信息（可选）
-            printgreen(f"Beam search found sequence: {optimal_action_sequence[:3]}..., first action: {next_action}")
-            
+            # printgreen(f"Beam search found sequence: {optimal_action_sequence[:3]}..., first action: {next_action}")
+            player_traj = [(player_x, player_y)]
+            for idx in optimal_action_sequence:
+                action = self._get_action(idx)
+                curr_x, curr_y = player_traj[-1][0] + action.xfactor * Nahida.ORIGIN_SPEED / Settings.FPS, player_traj[-1][1] + action.yfactor * Nahida.ORIGIN_SPEED / Settings.FPS
+                player_traj.append((curr_x, curr_y))
+            self.debug_drawer.write_player_traj(player_traj)
+
         except Exception as e:
             printyellow(f"Beam search failed, using NOMOVE: {e}")
             next_action = Action.NOMOVE
@@ -313,9 +319,9 @@ class OptBrain(BaseBrain):
         boss_target_y += self._current_player_y  # convert to absolute coordinates
 
         prefer_target_x = boss_target_x
-        prefer_target_y = max(Settings.window_height * 3. / 4, min(boss_target_y + Settings.window_height / 2, Settings.window_height))  # prefer to stay below the boss
+        prefer_target_y = max(Settings.window_height * 3. / 4, min(boss_target_y + Settings.window_height * 0.6, Settings.window_height - Settings.boss_radius))  # prefer to stay below the boss
         
-        weight_x, weight_y = 2.0, 1.4  # x方向的权重较大，y方向的权重较小，表示希望靠近boss的水平位置但保持一定的垂直距离
+        weight_x, weight_y = 2.2, 2.2  # x方向的权重较大，y方向的权重较小，表示希望靠近boss的水平位置但保持一定的垂直距离
         cost = weight_x * np.abs(prefer_target_x - target_pos[0]) + weight_y * np.abs(prefer_target_y - target_pos[1])
         return cost
     

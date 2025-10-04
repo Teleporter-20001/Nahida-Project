@@ -24,6 +24,7 @@ class Settings:
     window_width: int = 600
     window_height: int = 800
     window_background_color: pygame.color.Color = pygame.Color(80, 160, 150)
+    save_record: bool = True
 
     consider_bullets_num: int = 10
     
