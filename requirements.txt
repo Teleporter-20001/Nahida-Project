@@ -6,3 +6,4 @@ pandas
 PyQt5
 pytest
 tqdm
+scipy

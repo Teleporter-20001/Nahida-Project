@@ -26,6 +26,14 @@ class Settings:
     window_background_color: pygame.color.Color = pygame.Color(80, 160, 150)
 
     consider_bullets_num: int = 10
+    
+    # player params
+    player_img_width: int = 80
+    player_img_height: int = 130
+    player_radius: int = 8
+    
+    # boss params
+    boss_radius: int = 50
 
     # related to reward
     alive_reward: float = 0.055

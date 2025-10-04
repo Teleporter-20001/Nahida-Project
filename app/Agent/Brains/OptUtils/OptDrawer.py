@@ -55,6 +55,7 @@ def _window_process_main(queue: mp.Queue, predict_len: int):
             player_x, player_y = data["player"]
             boss_x, boss_y, boss_vx, boss_vy, boss_ax, boss_ay = data["boss"]
             bullets = data["bullets"]
+            target_x, target_y = data.get("target", (None, None))
             
             # Draw player
             pygame.draw.circle(screen, (127, 127, 127), (int(player_x), int(player_y)), 8)
@@ -92,9 +93,15 @@ def _window_process_main(queue: mp.Queue, predict_len: int):
                 except (TypeError, ValueError, OverflowError, AttributeError) as e:
                     printred(f'Error converting bullet radius to int: {br} (type: {type(br)}), error: {e}')
                     continue
+                
+            # Draw target point
+            if target_x is not None and target_y is not None:
+                pygame.draw.circle(screen, (0, 255, 0), (int(target_x), int(target_y)), 10, 4)
+                text_surface = font.render(f'Target: ({target_x:.1f}, {target_y:.1f})', True, (0, 128, 0))
+                screen.blit(text_surface, (10, 10))
 
         pygame.display.update()
-        clock.tick(Settings.FPS)
+        clock.tick(Settings.FPS // 2)
 
 
 class OptDrawer:
@@ -124,6 +131,8 @@ class OptDrawer:
         self.boss_ay = 0.0
         self.bullets: list[tuple[float, float, float, float, float, float, float]] = []  # list of (x, y, vx, vy, ax, ay, r)
         self.predict_len: int = 10
+        self.target_x = 0.0
+        self.target_y = 0.0
         
         self._queue: Optional[mp.Queue] = None # pass data to subprocess to draw debug info
         self._process: Optional[mp.Process] = None
@@ -143,6 +152,10 @@ class OptDrawer:
         self.boss_ax = ax
         self.boss_ay = ay
         
+    def write_target_data(self, x: float, y: float):
+        self.target_x = x
+        self.target_y = y
+        
     def write_bullet_data(self, idx: int, x: float, y: float, vx: float, vy: float, ax: float, ay: float, r: int):
         if idx >= len(self.bullets):
             if idx >= Settings.consider_bullets_num:
@@ -158,6 +171,7 @@ class OptDrawer:
                 "player": (self.player_x, self.player_y),
                 "boss": (self.boss_x, self.boss_y, self.boss_vx, self.boss_vy, self.boss_ax, self.boss_ay),
                 "bullets": self.bullets,
+                "target": (self.target_x, self.target_y),
             }
             self._queue.put(data)
             
