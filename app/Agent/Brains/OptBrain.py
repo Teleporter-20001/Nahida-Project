@@ -136,14 +136,14 @@ class OptBrain(BaseBrain):
         self._bullets_waypoints_calced: bool = False  # 标记子弹轨迹点是否已经计算过，避免重复计算
         self._boss_waypoints: np.ndarray = np.zeros((predict_len, 2), dtype=np.float32)  # 记录boss在未来predict_len帧内的轨迹点
         self._boss_waypoints_calced: bool = False  # 标记boss轨迹点是否已经计算过，避免重复计算
-        self._rough_collision_weights: np.ndarray = np.exp(-np.linspace(0, predict_len-1, predict_len) / (predict_len / 3))  # 指数衰减的权重，用于粗略碰撞检测的加权
+        self._rough_collision_weights: np.ndarray = np.array(list(reversed(np.exp(-np.linspace(0, predict_len-1, predict_len) / (predict_len / 1)))))  # 指数衰减的权重，用于粗略碰撞检测的加权
         self._bullet_danger_zone_radius = Settings.player_radius + 15 + 15  # 粗略碰撞检测的危险区域半径
         self._last_target_pos: tuple[float, float] = (Settings.window_width / 2, Settings.window_height * 3 / 4)  # 上一帧的目标位置，初始为屏幕中央偏下
         self._target_pos: tuple[float, float] = self._last_target_pos  # 当前帧的目标位置，初始为上一帧的位置
         
         # for step 3
-        self.beam_width = 10  # Beam search的beam宽度
-        self.early_stop_threshold = 10  # 提前停止的阈值，如果找到成本很低的解就提前停止
+        self.beam_width = 40  # Beam search的beam宽度
+        self.early_stop_threshold = 1.0 / np.Infinity  # 提前停止的阈值，如果找到成本很低的解就提前停止
         
 
     def decide_action(self, state: State) -> Action:
@@ -217,7 +217,7 @@ class OptBrain(BaseBrain):
         
         # -------------------------------------------------------------------------
         # opt step 2: decide the best target position to go to
-        weight_prefer, weight_collision, weight_smooth = 1.2, 0.5, 0.05
+        weight_prefer, weight_collision, weight_smooth = 12, 0.04, 0.5
         
         # Define the combined objective function
         def objective_function_step2(pos):
@@ -244,8 +244,8 @@ class OptBrain(BaseBrain):
         bounds = [(x_min, x_max), (y_min, y_max)]
         
         # Initialize best position and cost
-        best_pos = self._last_target_pos
-        best_cost = float('inf')
+        # best_pos = self._last_target_pos
+        # best_cost = float('inf')
         
         if SCIPY_AVAILABLE:
             # Use scipy optimization methods
@@ -257,8 +257,8 @@ class OptBrain(BaseBrain):
         self.debug_drawer.write_target_data(self._target_pos[0], self._target_pos[1])
         
         # Debug information
-        boss_abs_x = player_x + boss_from_player_x
-        boss_abs_y = player_y + boss_from_player_y
+        # boss_abs_x = player_x + boss_from_player_x
+        # boss_abs_y = player_y + boss_from_player_y
         # print(f"Player: ({player_x:.1f}, {player_y:.1f}), Boss: ({boss_abs_x:.1f}, {boss_abs_y:.1f}), Target: ({self._target_pos[0]:.1f}, {self._target_pos[1]:.1f})")
         
         # ----------------------------------------------------------------------------
@@ -270,8 +270,8 @@ class OptBrain(BaseBrain):
         # 使用Beam Search找到最优行动序列
         try:
             optimal_action_sequence = self._beam_search_action_sequence(
-                weight_collision=4.0,    # 避免碰撞的权重
-                weight_togoal=0.5,       # 接近目标的权重
+                weight_collision=5.0,    # 避免碰撞的权重
+                weight_togoal=1.0,       # 接近目标的权重
                 weight_smooth=0.1        # 平滑性权重
             )
             
@@ -279,7 +279,12 @@ class OptBrain(BaseBrain):
             next_action = self._get_best_action_from_sequence(optimal_action_sequence)
             
             # 调试信息（可选）
-            # printgreen(f"Beam search found sequence: {optimal_action_sequence[:3]}..., first action: {next_action}")
+            printgreen(
+                f"Optimal action sequence cost - \
+                    collision: {self._J_collision_rough(self._target_pos, boss_traj, bullet_trajs):.2f}, \
+                    togoal: {self._J_goal(self._target_pos, boss_traj, bullet_trajs):.2f}, \
+                    smooth: {self._J_smooth(self._target_pos, self._last_target_pos):.2f}")
+            printgreen(f"Beam search found sequence: {optimal_action_sequence[:4]}..., first action: {next_action}")
             player_traj = [(player_x, player_y)]
             for idx in optimal_action_sequence:
                 action = self._get_action(idx)
@@ -312,14 +317,14 @@ class OptBrain(BaseBrain):
         is_out_of_bound = not (Settings.player_img_width / 2 <= target_pos[0] <= Settings.window_width - Settings.player_img_width / 2 and Settings.player_img_height / 2 <= target_pos[1] <= Settings.window_height - Settings.player_img_height / 2)
         if is_out_of_bound:
             return float('inf')  # out of bound is not allowed
-        
-        # Calculate the boss target after 5 frames
-        boss_target_x, boss_target_y = boss_traj(5) if boss_traj is not None else (0.0, 0.0)
+
+        # Calculate the boss target after action_predict_len frames
+        boss_target_x, boss_target_y = boss_traj(self.action_predict_len) if boss_traj is not None else (0.0, 0.0)
         boss_target_x += self._current_player_x  # convert to absolute coordinates
         boss_target_y += self._current_player_y  # convert to absolute coordinates
 
         prefer_target_x = boss_target_x
-        prefer_target_y = max(Settings.window_height * 3. / 4, min(boss_target_y + Settings.window_height * 0.6, Settings.window_height - Settings.boss_radius))  # prefer to stay below the boss
+        prefer_target_y = max(Settings.window_height * 3. / 4, min(boss_target_y + Settings.window_height * 0.4, Settings.window_height - Settings.boss_radius))  # prefer to stay below the boss
         
         weight_x, weight_y = 2.2, 2.2  # x方向的权重较大，y方向的权重较小，表示希望靠近boss的水平位置但保持一定的垂直距离
         cost = weight_x * np.abs(prefer_target_x - target_pos[0]) + weight_y * np.abs(prefer_target_y - target_pos[1])
@@ -572,10 +577,16 @@ class OptBrain(BaseBrain):
         """
         cost = 0.0
         player_pos = (self._current_player_x, self._current_player_y)
+        # player_to_target_vec = np.array(self._target_pos) - np.array(player_pos)
+        # player_to_target_vec_unit = player_to_target_vec / (np.linalg.norm(player_to_target_vec) + 1e-3)
         for step in range(len(action_seq)):
             _action = self._get_action(action_seq[step])
             player_pos = tuple(np.array(player_pos) + (np.array([_action.xfactor, _action.yfactor]) * Nahida.ORIGIN_SPEED / Settings.FPS))
-            cost += np.hypot(self._target_pos[0] - player_pos[0], self._target_pos[1] - player_pos[1]) ** 2
+            cost += np.hypot(self._target_pos[0] - player_pos[0], self._target_pos[1] - player_pos[1]) ** 2  # 希望每一步都接近目标位置
+        #     action_vec = np.array([_action.xfactor, _action.yfactor])
+        #     action_vec_unit = action_vec / (np.linalg.norm(action_vec) + 1e-3) if _action != Action.NOMOVE else np.dot(np.array([[np.cos(np.pi/2), np.sin(np.pi/2)], [-np.sin(np.pi/2), np.cos(np.pi/2)]]), player_to_target_vec_unit)
+        #     cost += -np.cos(np.dot(player_to_target_vec_unit, action_vec_unit)) + 1  # 希望action_vec和player_to_target_vec方向一致
+        # cost += 0.03 * np.hypot(player_pos[0] - self._target_pos[0], player_pos[1] - self._target_pos[1])  # 希望最终位置接近目标位置
         return cost
     
     def _J_action_smooth(self, action_seq: list[int]) -> float:
@@ -592,6 +603,8 @@ class OptBrain(BaseBrain):
         for step in range(1, len(action_seq)):
             prev_action = self._get_action(action_seq[step - 1])
             curr_action = self._get_action(action_seq[step])
+            if prev_action == Action.NOMOVE or curr_action == Action.NOMOVE:
+                continue
             cost += (np.arctan2(curr_action.yfactor, curr_action.xfactor) - np.arctan2(prev_action.yfactor, prev_action.xfactor)) ** 2
         return cost
 
