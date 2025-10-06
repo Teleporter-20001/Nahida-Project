@@ -1,19 +1,20 @@
+import heapq
 import os
 import random
-import sys
-import pygame
-from math import sin, cos, pi
-import numpy as np
-import heapq
+from math import pi
 
+import numpy as np
+import pygame
+
+from app.Agent.DataStructure import State, Action
 from app.characters.AimatPlayerBullet import AimatPlayerBullet
-from app.characters.Nahida import Nahida
 from app.characters.Boss import Boss
+from app.characters.Nahida import Nahida
 from app.characters.OurBullet import OurBullet
 from app.characters.SprayBullet import SprayBullet
 from app.characters.StraightEnemyBullet import StraightEnemyBullet
 from app.common.Settings import Settings
-from app.Agent.DataStructure import State, Action
+from app.common.utils import printred
 from app.env.RewardSet import RewardSet
 
 
@@ -42,8 +43,8 @@ class TouhouEnv:
 
     PLAYER_SHOOT_PERIOD = int(Settings.FPS / 8)    # player shoot once every ? frames
     BOSS_CHANGE_DIR_PERIOD = int(Settings.FPS * 2.5)
-    BOSS_SPRAY_PERIOD = int(Settings.FPS * 4)
-    BOSS_AIMAT_PLAYER_SHOOT_PERIOD = int(Settings.FPS * 4)
+    BOSS_SPRAY_PERIOD = int(Settings.FPS * 1.8)
+    BOSS_AIMAT_PLAYER_SHOOT_PERIOD = int(Settings.FPS * 2)
     BOSS_RAIN_PERIOD = int(Settings.FPS * 3)
     
     def __init__(self, settings=Settings):
@@ -57,6 +58,8 @@ class TouhouEnv:
         # optional: remove env var so it doesn't affect later windows
         # os.environ.pop('SDL_VIDEO_WINDOW_POS', None)
         pygame.display.set_caption('TouhouEnv')
+        # dbg = Debugger.instance()
+        # dbg.start_window()
 
         # font for FPS display (initialized once)
         try:
@@ -69,9 +72,9 @@ class TouhouEnv:
         self.player = Nahida(
             int(settings.window_width * .5),
             int(settings.window_height * .75),
-            8,
+            Settings.player_radius,
             os.path.join('resources', 'nahida_2.png'),
-            target_size=(80, 130)
+            target_size=(Settings.player_img_width, Settings.player_img_height)
         )
         self.players.add(self.player)   # type: ignore
         # sprite group holding player's bullets
@@ -80,10 +83,10 @@ class TouhouEnv:
         self.boss = Boss(
             self.settings.window_width / 2,
             self.settings.window_height / 5,
-            50,
+            Settings.boss_radius,
             os.path.join('resources', 'boss.png'),
             health=250, 
-            target_size=(100, 100)
+            target_size=(2*Settings.boss_radius, 2*Settings.boss_radius)
         )
         self.enemies.add(self.boss) # type: ignore
         self.enemy_bullets = pygame.sprite.Group()
@@ -110,7 +113,7 @@ class TouhouEnv:
     def _get_observation(self) -> State:
         
         # Find nearest k enemy bullets to the player and return their features
-        k = 10
+        k = Settings.consider_bullets_num
         px = self.player.posx
         py = self.player.posy
 
@@ -153,7 +156,7 @@ class TouhouEnv:
             'boss_velx': self.boss.vx,
             'boss_vely': self.boss.vy,
             'nearest_bullets': arr, # shape (k,5) array of nearest enemy bullets, each row is (x, y(relative to player), vx, vy, radius)
-            'human_action': self.human_action,
+            'human_action': self.human_action, 
         }
         return State(observation=obs)
 
@@ -164,7 +167,7 @@ class TouhouEnv:
         self.player._posy = int(self.settings.window_height * .75)
 
         # self.boss._posx = int(self.settings.window_width / 4)
-        self.boss._posx = int(random.randint(self.boss.rect.width/2 + 5, self.settings.window_width - self.boss.rect.width/2 - 5))
+        self.boss._posx = int(random.randint(self.boss.rect.width//2 + 5, self.settings.window_width - self.boss.rect.width//2 - 5))
         self.boss._posy = int(self.settings.window_height / 5)
         self.boss.health = self.boss.max_health
 
@@ -202,7 +205,7 @@ class TouhouEnv:
             self._player_shoot()
         if self.worldAge % self.BOSS_CHANGE_DIR_PERIOD == 0:
             self._boss_change_direction()
-        if (self.worldAge + _offset) % self.BOSS_SPRAY_PERIOD == 0:
+        if self.worldAge % self.BOSS_SPRAY_PERIOD == 0:
             self._boss_spray()
         if (self.worldAge + _offset) % self.BOSS_AIMAT_PLAYER_SHOOT_PERIOD == 0:
             self._boss_aimat_player_shoot()
@@ -287,7 +290,7 @@ class TouhouEnv:
             done = True
 
         # player vs enemy bullets collision: circle-vs-circle using radius fields
-        min_dist = np.infty
+        min_dist = np.inf
         try:
             px = self.player.posx
             py = self.player.posy
@@ -312,7 +315,7 @@ class TouhouEnv:
                 if dist < min_dist:
                     min_dist = dist
                 # encourage to avoid bullets closely: $ [px - bx, py - by] \dot [vx, vy] < 0$
-                if dist < self.player.radius + br + 40 and np.dot([dx, dy], [bullet.vx, bullet.vy]) < 0:
+                if self.player.radius + br + 10 < dist < self.player.radius + br + 40 and np.dot([dx, dy], [bullet.vx, bullet.vy]) < 0:
                     reward.avoid()
                 # collision if distance between centers <= (player radius + bullet radius)
                 if dist_sq <= (self.player.radius + br) ** 2:
@@ -321,7 +324,34 @@ class TouhouEnv:
             # reward += -3. / min_dist
         except Exception as e:
             # defensive: if sprites/groups aren't set up as expected, don't crash the env
-            print(f'Error in collision detection: {e}')
+            printred(f'Error in collision detection: {e}')
+            
+        # player vs enemy collision: circle-vs-circle using radius fields
+        try:
+            px = self.player.posx
+            py = self.player.posy
+            for enemy in self.enemies:
+                if done:
+                    break
+                # try to get enemy center; fallback to rect if attribute missing
+                try:
+                    ex = enemy.rect.centerx
+                    ey = enemy.rect.centery
+                except Exception:
+                    # if enemy has no rect, skip it
+                    continue
+
+                er = getattr(enemy, 'radius', getattr(enemy, '_radius', 0))
+
+                dx = px - ex
+                dy = py - ey
+                dist_sq = dx * dx + dy * dy
+                # collision if distance between centers <= (player radius + enemy radius)
+                if dist_sq <= (self.player.radius + er) ** 2:
+                    reward.behit()
+                    done = True
+        except Exception as e:
+            printred(f'Error in player-vs-enemy collision detection: {e}')
 
         info = {
             'reward_details': reward
@@ -380,7 +410,23 @@ class TouhouEnv:
                 self.screen.blit(fps_surf, (fps_x, fps_y))
         except Exception:
             pass
+
+        # ----------- Debugger heatmap panel (top-right corner) -----------
+        # try:
+        #     from app.common.Debugger import Debugger
+        #     dbg = Debugger.instance()
+        #     # lazy create surface
+        #     if not hasattr(dbg, '_debug_surface') or dbg._debug_surface is None:
+        #         dbg._debug_surface = pygame.Surface((120, 120))
+        #     dbg.render(dbg._debug_surface)
+        #     # blit to top-right
+        #     self.screen.blit(dbg._debug_surface, (self.settings.window_width - 130, 10))
+        # except Exception as e:
+        #     pass
+
         pygame.display.update()
+        if Settings.save_record:
+            pygame.image.save(self.screen, os.path.join('data', f'frame_{self.worldAge:05d}.png'))
         self.clock.tick(self.settings.FPS)
 
     def close(self):
@@ -452,8 +498,8 @@ class TouhouEnv:
         pygame.time.set_timer(TouhouEnv.BOSS_SPRAY_EVENT, 0)
 
     def _boss_spray(self):
-        r = random.randint(6, 12)
-        bullet_num = random.randint(3, 5)
+        r = random.randint(9, 12)
+        bullet_num = random.randint(5, 9)
         for theta in np.linspace(0, 2 * np.pi, num=bullet_num, endpoint=False):
             self.enemy_bullets.add(SprayBullet( # type: ignore
                 self.boss.posx,

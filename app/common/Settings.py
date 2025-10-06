@@ -20,7 +20,7 @@ class Settings:
     """
 
     # default values
-    FPS: int = 60
+    FPS: int = 30
     window_width: int = 600
     window_height: int = 800
     window_background_color: pygame.color.Color = pygame.Color(80, 160, 150)
@@ -39,7 +39,8 @@ class Settings:
     # related to reward
     alive_reward: float = 0.055
     BORDER_BUFFER: int = 60
-    BORDER_PUNISH: float = -0.4
+    # BORDER_PUNISH: float = -0.4
+    BORDER_PUNISH: float = 0.0
     hit_reward: float = 0.6
     kill_boss_reward: float = 80.0
     behit_reward: float = -100.0

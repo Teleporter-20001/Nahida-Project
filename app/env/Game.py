@@ -1,7 +1,10 @@
+import time
+
 import pygame
 import sys
 
 from app.Agent.Brains.BaseBrain import BaseBrain
+from app.common.utils import printpurple, printred
 from app.env.TouhouEnv import TouhouEnv
 from app.common.Settings import Settings
 
@@ -31,6 +34,7 @@ class Game:
         total_reward = 0.0
 
         for step in range(max_steps):
+            t1 = time.time()
             # handle events and forward to environment (so env can process timers)
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
@@ -51,7 +55,11 @@ class Game:
                 self.env.render()
 
             if done:
+                printred(f'Agent had kept alive for {step / Settings.FPS} seconds.')
                 break
+
+            t2 = time.time()
+            printpurple(f'Episode {step + 1} took {(t2 - t1) * 1000} milliseconds')
 
         return total_reward
 

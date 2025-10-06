@@ -3,7 +3,7 @@ from math import *
 
 class SprayBullet(BaseEnemyBullet):
     
-    ORIGIN_SPEED = 100
+    ORIGIN_SPEED = 160
 
     def __init__(self, x: float, y: float, radius: int, img_path: str, theta: float, vx: float = 0, vy: float = 0, target_size: tuple[int, int] = (-1, -1), inverse: bool=False):
         r = 10
@@ -20,7 +20,7 @@ class SprayBullet(BaseEnemyBullet):
         r = hypot(dx, dy)
         vel_radial_x = self.ORIGIN_SPEED * dx / r if r != 0 else 0
         vel_radial_y = self.ORIGIN_SPEED * dy / r if r != 0 else 0
-        omega = 0.2
+        omega = 0.8
         vel_tangential_x = -vel_radial_y * omega
         vel_tangential_y = vel_radial_x * omega
         if self.inverse:
