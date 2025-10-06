@@ -49,7 +49,7 @@ def _window_process_main(queue: mp.Queue, predict_len: int):
         try:
             data = queue.get_nowait()
         except Exception as e:
-            printred(f'error in reading data from queue: {sys.exc_info()}\n-------------\n{e}')
+            # printred(f'error in reading data from queue: {sys.exc_info()}\n-------------\n{e}')
             data = None
         
         if data is not None:
