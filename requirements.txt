@@ -7,3 +7,4 @@ PyQt5
 pytest
 tqdm
 scipy
+opencv-python
