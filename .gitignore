@@ -4,6 +4,7 @@ app/resources/*
 
 __pycache__/*
 **/*.pyc
+deprecated/*
 
 .*
 !.gitignore
