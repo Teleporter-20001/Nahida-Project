@@ -581,13 +581,13 @@ class TouhouEnv:
             for i in range(bullet_num):
                 self.enemy_bullets.add(StraightEnemyBullet( # type: ignore
                     begin_x + i * room_size_x,
-                    Settings.window_height / 2 - Settings.window_height / 2 * 0.95 * _dir,
+                    Settings.window_height / 2 - 380 * _dir,
                     random.randint(8, 12),
                     os.path.join('resources', 'bullet_super.png'),
                     pi / 2 * _dir
                 ))
                 self.enemy_bullets.add(StraightEnemyBullet( # type: ignore
-                    Settings.window_width / 2 - Settings.window_width / 2 * 0.95 * _dir,
+                    Settings.window_width / 2 - 280 * _dir,
                     begin_y + i * room_size_y,
                     random.randint(8, 12),
                     os.path.join('resources', 'bullet_super.png'),

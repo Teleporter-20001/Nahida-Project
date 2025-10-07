@@ -136,12 +136,12 @@ class OptBrain(BaseBrain):
         self._bullets_waypoints_calced: bool = False  # 标记子弹轨迹点是否已经计算过，避免重复计算
         self._boss_waypoints: np.ndarray = np.zeros((predict_len, 2), dtype=np.float32)  # 记录boss在未来predict_len帧内的轨迹点
         self._boss_waypoints_calced: bool = False  # 标记boss轨迹点是否已经计算过，避免重复计算
-        self._rough_collision_weights: np.ndarray = np.exp(np.linspace(0, predict_len-1, predict_len) / (predict_len / 2)) - 1 + 1e-2  # 指数的权重，用于粗略碰撞检测的加权
+        self._rough_collision_weights: np.ndarray = np.ones(self.predict_len)  # 指数的权重，用于粗略碰撞检测的加权
         self._last_target_pos: tuple[float, float] = (Settings.window_width / 2, Settings.window_height * 3 / 4)  # 上一帧的目标位置，初始为屏幕中央偏下
         self._target_pos: tuple[float, float] = self._last_target_pos  # 当前帧的目标位置，初始为上一帧的位置
         
         # for step 3
-        self.beam_width = 60  # Beam search的beam宽度
+        self.beam_width = 9  # Beam search的beam宽度
         self.early_stop_threshold = 1.0 / np.inf  # 提前停止的阈值，如果找到成本很低的解就提前停止
         self._last_optimal_action_seq: list[int] = [list(Action).index(Action.NOMOVE)] * self.action_predict_len  # 上一帧的最优行动序列，初始为全NOMOVE
         self.use_last_action_seq_will: float = 1.02 # How do we like to keep last action sequence. Larger number means we are more willing.
@@ -221,7 +221,7 @@ class OptBrain(BaseBrain):
         
         # -------------------------------------------------------------------------
         # opt step 2: decide the best target position to go to
-        weight_prefer, weight_collision, weight_smooth = 8, 20000, 0.5
+        weight_prefer, weight_collision, weight_smooth = 8, 200, 0.5
         
         # Define the combined objective function
         def objective_function_step2(pos):
@@ -284,8 +284,8 @@ class OptBrain(BaseBrain):
         # 使用Beam Search找到最优行动序列
         optimal_action_sequence: list[int] = []
         try:
-            collision___ = weight_3_collision = 2000
-            togoal___ = weight_togoal = 1.5
+            collision___ = weight_3_collision = 100
+            togoal___ = weight_togoal = 15
             smooth___ = weight_3_smooth = 3
             optimal_action_sequence = self._beam_search_action_sequence(
                 weight_collision=collision___,    # 避免碰撞的权重
@@ -434,7 +434,7 @@ class OptBrain(BaseBrain):
             """
             gamma = 1.0
             return gamma * max(0, int(z)) ** 2  # quadratic punishment for large changes in target position
-        THRESHOLD = 600 / Settings.FPS
+        THRESHOLD =180 / Settings.FPS
         return phi(np.hypot(target_pos[0] - last_target_pos[0], target_pos[1] - last_target_pos[1]) - THRESHOLD)
 
     def _optimize_with_scipy(self, objective_function, bounds, player_x: float, player_y: float) -> tuple[float, float]:
@@ -465,10 +465,11 @@ class OptBrain(BaseBrain):
         except Exception as e:
             printyellow(f"Local optimization failed: {e}")
         
-        # Method 2: Try optimization starting from current player position
+        # Method 2: Try optimization starting from the middle point between current player position and last target position
         try:
+            midpoint = (np.array([player_x, player_y]) + np.array(self._last_target_pos)) / 2
             result = minimize(objective_function,
-                            x0=np.array([player_x, player_y]),
+                            x0=midpoint,
                             bounds=bounds,
                             method='L-BFGS-B',
                             options={'maxiter': 30, 'ftol': 10.0})
@@ -570,7 +571,7 @@ class OptBrain(BaseBrain):
             return gamma * np.max((0, -z)) ** 3  # cubic punishment for being inside the danger zone
         cost = 0.0
         player_pos = (self._current_player_x, self._current_player_y)
-        SAFETY_THRESH = Settings.player_radius + 30
+        SAFETY_THRESH = Settings.player_radius + 40
         for step in range(len(action_seq)):
             _action = self._get_action(action_seq[step])
             player_pos = tuple(np.array(player_pos) + (np.array([_action.xfactor, _action.yfactor]) * Nahida.ORIGIN_SPEED / Settings.FPS))

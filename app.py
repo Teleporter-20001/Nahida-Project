@@ -18,7 +18,7 @@ if __name__ == '__main__':
         # settings = Settings()
         env = TouhouEnv(Settings)
         game: Game = Game(env)
-        agent: BaseBrain = OptBrain(memory_len=8, predict_len=12, action_predict_len=12)
+        agent: BaseBrain = OptBrain(memory_len=6, predict_len=9, action_predict_len=9)
         once_reward = game.run_episode(agent, max_steps=100000, render=True)
         env._terminated = True
         env.close()
