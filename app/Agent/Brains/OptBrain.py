@@ -99,7 +99,7 @@ def _predict_trajectory(xs: np.ndarray, ys: np.ndarray, vxs: np.ndarray, vys: np
 
 class OptBrain(BaseBrain):
 
-    def __init__(self, memory_len: int = 10, predict_len: int = 10, action_predict_len: int = 10, consider_bullets_num: int = 10):
+    def __init__(self, memory_len: int = 10, predict_len: int = 10, action_predict_len: int = 10, consider_bullets_num: int = 10, be_teached: bool = False):
         """Initialize the OptBrain.
 
         Args:
@@ -110,6 +110,7 @@ class OptBrain(BaseBrain):
         """
         assert action_predict_len <= predict_len, f'action_predict_len {action_predict_len} should be less than or equal to predict_len {predict_len}'
         super().__init__()
+        self.be_teached = be_teached
         
         self.memory_len = memory_len
         self.predict_len = predict_len
@@ -140,7 +141,7 @@ class OptBrain(BaseBrain):
         self._target_pos: tuple[float, float] = self._last_target_pos  # 当前帧的目标位置，初始为上一帧的位置
         
         # for step 3
-        self.beam_width = 12  # Beam search的beam宽度
+        self.beam_width = 60  # Beam search的beam宽度
         self.early_stop_threshold = 1.0 / np.inf  # 提前停止的阈值，如果找到成本很低的解就提前停止
         self._last_optimal_action_seq: list[int] = [list(Action).index(Action.NOMOVE)] * self.action_predict_len  # 上一帧的最优行动序列，初始为全NOMOVE
         self.use_last_action_seq_will: float = 1.02 # How do we like to keep last action sequence. Larger number means we are more willing.
@@ -152,6 +153,9 @@ class OptBrain(BaseBrain):
         if obs is None:
             printred('error: empty observation')
             return Action.NOMOVE
+
+        if self.be_teached:
+            return obs['human_action']
 
         # ----------------------------------------------------------------------------
         # step 0: maintain memory
