@@ -34,7 +34,7 @@ if __name__ == '__main__':
                     fourcc = cv2.cv.FOURCC(*'mp4v')
                 except Exception:
                     fourcc = 0
-            fps = 20
+            fps = 60
             out = cv2.VideoWriter(out_name, fourcc, fps, (width, height))
             for frame_file in files:
                 img = cv2.imread(frame_file)

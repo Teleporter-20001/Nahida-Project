@@ -18,7 +18,7 @@ def normal_play():
     # global env, game
     env = TouhouEnv(Settings)
     game: Game = Game(env)
-    agent: BaseBrain = OptBrain(memory_len=6, predict_len=9, action_predict_len=9)
+    agent: BaseBrain = OptBrain(memory_len=8, predict_len=15, action_predict_len=15)
     once_reward = game.run_episode(agent, max_steps=100000, render=True)
     env._terminated = True
     env.close()
@@ -54,7 +54,7 @@ def profile_run(function: Callable[[], None]):
 
 if __name__ == '__main__':
     play_mode: bool = True
-    performance_analyze = True
+    performance_analyze = False
     if play_mode:
         if performance_analyze:
             profile_run(normal_play)

@@ -4,7 +4,7 @@ import pygame
 import sys
 
 from app.Agent.Brains.BaseBrain import BaseBrain
-from app.common.utils import printpurple, printred
+from app.common.utils import printpurple, printred, printgreen
 from app.env.TouhouEnv import TouhouEnv
 from app.common.Settings import Settings
 
@@ -56,6 +56,8 @@ class Game:
 
             if done:
                 printred(f'Agent had kept alive for {step / Settings.FPS} seconds.')
+                if self.env.boss.health <= 0:
+                    printgreen('You win!')
                 break
 
             t2 = time.time()

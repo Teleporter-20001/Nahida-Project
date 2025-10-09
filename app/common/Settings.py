@@ -30,7 +30,7 @@ class Settings:
     
     # debug settings
     enable_debug_drawer: bool = True  # Set to True to enable OptBrain debug window
-    debug_drawer_fps_limit: int = 40   # Limit debug window FPS to reduce overhead
+    debug_drawer_fps_limit: int = 60   # Limit debug window FPS to reduce overhead
     debug_data_compression: bool = True  # Enable data compression for debug transmission
     
     # player params
