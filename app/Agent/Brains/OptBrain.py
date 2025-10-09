@@ -159,66 +159,13 @@ class OptBrain(BaseBrain):
 
         # ----------------------------------------------------------------------------
         # step 0: maintain memory
-        player_x = obs['player_x']
-        player_y = obs['player_y']
-        boss_from_player_x = obs['boss_from_player_x']
-        boss_from_player_y = obs['boss_from_player_y']
-        boss_velx = obs['boss_velx']
-        boss_vely = obs['boss_vely']
-        nearest_bullets = obs['nearest_bullets']  # shape (k,5) array of nearest enemy bullets, each row is (x, y(relative to player), vx, vy, radius)
-        
-        # Store current player position for coordinate conversion
-        self._current_player_x = player_x
-        self._current_player_y = player_y
-        
-        self._mem_boss_xs.append(boss_from_player_x)
-        self._mem_boss_ys.append(boss_from_player_y)
-        self._mem_boss_vxs.append(boss_velx)
-        self._mem_boss_vys.append(boss_vely)
-        for i in range(self.consider_bullets_num):
-            relx, rely, vx, vy, _r = nearest_bullets[i]
-            self._mem_bullets_xs[i].append(relx)
-            self._mem_bullets_ys[i].append(rely)
-            self._mem_bullets_vxs[i].append(vx)
-            self._mem_bullets_vys[i].append(vy)
-            self._mem_bullets_rads[i].append(_r)
-            
-        self._bullets_waypoints_calced = False  # 新的一帧，子弹轨迹点需要重新计算
-        self._boss_waypoints_calced = False  # 新的一帧，boss轨迹点需要重新计算
+        boss_from_player_x, boss_from_player_y, boss_velx, boss_vely, player_x, player_y = self._decide_step_0_maintain_memory(obs)
 
         # ----------------------------------------------------------------------------
         # opt step 1: predict boss and bullets' trajectories
-        boss_traj_params = _predict_trajectory(
-            np.array(self._mem_boss_xs),
-            np.array(self._mem_boss_ys),
-            np.array(self._mem_boss_vxs),
-            np.array(self._mem_boss_vys)
-        )
-        boss_accx, boss_accy = boss_traj_params[4], boss_traj_params[5]
-        boss_traj = boss_traj_params[6]
-        bullet_trajs_params = []
-        for i in range(self.consider_bullets_num):
-            bullet_traj_param = _predict_trajectory(
-                np.array(self._mem_bullets_xs[i]),
-                np.array(self._mem_bullets_ys[i]),
-                np.array(self._mem_bullets_vxs[i]),
-                np.array(self._mem_bullets_vys[i])
-            )   # each row: (x, y, vx, vy, ax, ay, traj)
-            bullet_trajs_params.append(bullet_traj_param)
-        bullet_trajs = [params[6] for params in bullet_trajs_params]
-            
-        self.debug_drawer.write_player_data(player_x, player_y)
-        self.debug_drawer.write_boss_data(boss_from_player_x, boss_from_player_y, boss_velx, boss_vely, 0.0, 0.0)
-        for i in range(self.consider_bullets_num):
-            relx = self._mem_bullets_xs[i][-1] if len(self._mem_bullets_xs[i]) > 0 else 0.0
-            rely = self._mem_bullets_ys[i][-1] if len(self._mem_bullets_ys[i]) > 0 else 0.0
-            vx = self._mem_bullets_vxs[i][-1] if len(self._mem_bullets_vxs[i]) > 0 else 0.0
-            vy = self._mem_bullets_vys[i][-1] if len(self._mem_bullets_vys[i]) > 0 else 0.0
-            ax = (bullet_trajs_params[i][4] if len(bullet_trajs_params[i]) > 1 else 0.0)
-            ay = (bullet_trajs_params[i][5] if len(bullet_trajs_params[i]) > 1 else 0.0)
-            r = self._mem_bullets_rads[i][-1] if len(self._mem_bullets_rads[i]) > 0 else 10
-            self.debug_drawer.write_bullet_data(i, relx, rely, vx, vy, ax, ay, r)
-        
+        boss_traj, bullet_trajs = self._decide_step_1_predict_trajs(boss_from_player_x, boss_from_player_y, boss_velx,
+                                                                    boss_vely, player_x, player_y)
+
         # -------------------------------------------------------------------------
         # opt step 2: decide the best target position to go to
         weight_prefer, weight_collision, weight_smooth = 8, 200, 0.5
@@ -241,61 +188,45 @@ class OptBrain(BaseBrain):
                          weight_smooth * cost_smooth)
             
             return total_cost
-        
-        # Set bounds for optimization (player must stay within game window)
-        x_min, x_max = Settings.player_img_width / 2, Settings.window_width - Settings.player_img_width / 2
-        y_min, y_max = Settings.player_img_height / 2, Settings.window_height - Settings.player_img_height / 2
-        bounds = [(x_min, x_max), (y_min, y_max)]
-        
-        # Initialize best position and cost
-        # best_pos = self._last_target_pos
-        # best_cost = float('inf')
-        
-        if SCIPY_AVAILABLE:
-            # Use scipy optimization methods
-            self._target_pos = self._optimize_with_scipy(objective_function_step2, bounds, player_x, player_y)
-            # target_candidate1 = self._optimize_with_scipy(objective_function_step2, bounds, player_x, player_y)
-        # else:
-        # Use fallback grid search method
-        # target_candidate2 = self._optimize_with_grid_search(objective_function_step2, bounds)
-        # cost1 = objective_function_step2(target_candidate1) if target_candidate1 else float('inf')
-        # cost2 = objective_function_step2(target_candidate2) if target_candidate2 else float('inf')
-        # self._target_pos = target_candidate1 if cost1 < cost2 else target_candidate2
 
-        # debug output
-        printblue(
-            f'Target pos cost: \
-            goal: {weight_prefer * self._J_goal(self._target_pos, boss_traj, bullet_trajs):.2f}\
-            collision: {weight_collision * self._J_collision_rough(self._target_pos, boss_traj, bullet_trajs):.2f}\
-            smooth: {weight_smooth * self._J_smooth(self._target_pos, self._last_target_pos):.2f}')
-        self.debug_drawer.write_target_data(self._target_pos[0], self._target_pos[1])
-        
-        # Debug information
-        # boss_abs_x = player_x + boss_from_player_x
-        # boss_abs_y = player_y + boss_from_player_y
-        # print(f"Player: ({player_x:.1f}, {player_y:.1f}), Boss: ({boss_abs_x:.1f}, {boss_abs_y:.1f}), Target: ({self._target_pos[0]:.1f}, {self._target_pos[1]:.1f})")
-        
+        self._decide_step_2_optimize_targetpos(boss_traj, bullet_trajs, objective_function_step2, player_x, player_y,
+                                               weight_collision, weight_prefer, weight_smooth)
+
         # ----------------------------------------------------------------------------
         # opt step 3: decide action to move towards target position with MPC
         if self._target_pos is None:
             printred("error: target_pos is None, using NOMOVE")
             return Action.NOMOVE
-        
+
+        weight_3_collision = 100
+        weight_togoal = 15
+        weight_3_smooth = 3
+
+        next_action, optimal_action_sequence = self._decide_step_3_optimize_action(boss_traj, bullet_trajs, player_x,
+                                                                                   player_y, weight_3_collision,
+                                                                                   weight_3_smooth, weight_togoal)
+
+        # step final: maintain memories, such as last target pos
+        self.debug_drawer.draw()
+        self._last_target_pos = self._target_pos
+        self._last_optimal_action_seq = optimal_action_sequence[1:] + [list(Action).index(Action.NOMOVE)]
+            
+        return next_action
+
+    def _decide_step_3_optimize_action(self, boss_traj, bullet_trajs, player_x, player_y, weight_3_collision,
+                                       weight_3_smooth, weight_togoal):
         # 使用Beam Search找到最优行动序列
         optimal_action_sequence: list[int] = []
         try:
-            collision___ = weight_3_collision = 100
-            togoal___ = weight_togoal = 15
-            smooth___ = weight_3_smooth = 3
             optimal_action_sequence = self._beam_search_action_sequence(
-                weight_collision=collision___,    # 避免碰撞的权重
-                weight_togoal=togoal___,       # 接近目标的权重
-                weight_smooth=smooth___  # 平滑性权重
+                weight_collision=weight_3_collision,  # 避免碰撞的权重
+                weight_togoal=weight_togoal,  # 接近目标的权重
+                weight_smooth=weight_3_smooth  # 平滑性权重
             )
-            
+
             # 从最优序列中获取第一个动作
             next_action = self._get_best_action_from_sequence(optimal_action_sequence)
-            
+
             # 调试信息（可选）
             printgreen(
                 f"Optimal action sequence cost - \
@@ -306,21 +237,107 @@ class OptBrain(BaseBrain):
             player_traj = [(player_x, player_y)]
             for idx in optimal_action_sequence:
                 action = self._get_action(idx)
-                curr_x, curr_y = player_traj[-1][0] + action.xfactor * Nahida.ORIGIN_SPEED / Settings.FPS, player_traj[-1][1] + action.yfactor * Nahida.ORIGIN_SPEED / Settings.FPS
+                curr_x, curr_y = player_traj[-1][0] + action.xfactor * Nahida.ORIGIN_SPEED / Settings.FPS, \
+                                 player_traj[-1][1] + action.yfactor * Nahida.ORIGIN_SPEED / Settings.FPS
                 player_traj.append((curr_x, curr_y))
             self.debug_drawer.write_player_traj(player_traj)
 
         except Exception as e:
             printyellow(f"Beam search failed, using NOMOVE: {e}")
             next_action = Action.NOMOVE
-        
-        # step final: maintain memories, such as last target pos
-        self.debug_drawer.draw()
-        self._last_target_pos = self._target_pos
-        self._last_optimal_action_seq = optimal_action_sequence[1:] + [list(Action).index(Action.NOMOVE)]
-            
-        return next_action
-    
+        return next_action, optimal_action_sequence
+
+    def _decide_step_2_optimize_targetpos(self, boss_traj, bullet_trajs, objective_function_step2, player_x, player_y,
+                                          weight_collision, weight_prefer, weight_smooth):
+        # Set bounds for optimization (player must stay within game window)
+        x_min, x_max = Settings.player_img_width / 2, Settings.window_width - Settings.player_img_width / 2
+        y_min, y_max = Settings.player_img_height / 2, Settings.window_height - Settings.player_img_height / 2
+        bounds = [(x_min, x_max), (y_min, y_max)]
+        # Initialize best position and cost
+        # best_pos = self._last_target_pos
+        # best_cost = float('inf')
+        if SCIPY_AVAILABLE:
+            # Use scipy optimization methods
+            self._target_pos = self._optimize_with_scipy(objective_function_step2, bounds, player_x, player_y)
+            # target_candidate1 = self._optimize_with_scipy(objective_function_step2, bounds, player_x, player_y)
+        # else:
+        # Use fallback grid search method
+        # target_candidate2 = self._optimize_with_grid_search(objective_function_step2, bounds)
+        # cost1 = objective_function_step2(target_candidate1) if target_candidate1 else float('inf')
+        # cost2 = objective_function_step2(target_candidate2) if target_candidate2 else float('inf')
+        # self._target_pos = target_candidate1 if cost1 < cost2 else target_candidate2
+        # debug output
+        printblue(
+            f'Target pos cost: \
+            goal: {weight_prefer * self._J_goal(self._target_pos, boss_traj, bullet_trajs):.2f}\
+            collision: {weight_collision * self._J_collision_rough(self._target_pos, boss_traj, bullet_trajs):.2f}\
+            smooth: {weight_smooth * self._J_smooth(self._target_pos, self._last_target_pos):.2f}')
+        self.debug_drawer.write_target_data(self._target_pos[0], self._target_pos[1])
+        # Debug information
+        # boss_abs_x = player_x + boss_from_player_x
+        # boss_abs_y = player_y + boss_from_player_y
+        # print(f"Player: ({player_x:.1f}, {player_y:.1f}), Boss: ({boss_abs_x:.1f}, {boss_abs_y:.1f}), Target: ({self._target_pos[0]:.1f}, {self._target_pos[1]:.1f})")
+
+    def _decide_step_1_predict_trajs(self, boss_from_player_x, boss_from_player_y, boss_velx, boss_vely, player_x,
+                                     player_y):
+        boss_traj_params = _predict_trajectory(
+            np.array(self._mem_boss_xs),
+            np.array(self._mem_boss_ys),
+            np.array(self._mem_boss_vxs),
+            np.array(self._mem_boss_vys)
+        )
+        boss_accx, boss_accy = boss_traj_params[4], boss_traj_params[5]
+        boss_traj = boss_traj_params[6]
+        bullet_trajs_params = []
+        for i in range(self.consider_bullets_num):
+            bullet_traj_param = _predict_trajectory(
+                np.array(self._mem_bullets_xs[i]),
+                np.array(self._mem_bullets_ys[i]),
+                np.array(self._mem_bullets_vxs[i]),
+                np.array(self._mem_bullets_vys[i])
+            )  # each row: (x, y, vx, vy, ax, ay, traj)
+            bullet_trajs_params.append(bullet_traj_param)
+        bullet_trajs = [params[6] for params in bullet_trajs_params]
+        self.debug_drawer.write_player_data(player_x, player_y)
+        self.debug_drawer.write_boss_data(boss_from_player_x, boss_from_player_y, boss_velx, boss_vely, 0.0, 0.0)
+        for i in range(self.consider_bullets_num):
+            relx = self._mem_bullets_xs[i][-1] if len(self._mem_bullets_xs[i]) > 0 else 0.0
+            rely = self._mem_bullets_ys[i][-1] if len(self._mem_bullets_ys[i]) > 0 else 0.0
+            vx = self._mem_bullets_vxs[i][-1] if len(self._mem_bullets_vxs[i]) > 0 else 0.0
+            vy = self._mem_bullets_vys[i][-1] if len(self._mem_bullets_vys[i]) > 0 else 0.0
+            ax = (bullet_trajs_params[i][4] if len(bullet_trajs_params[i]) > 1 else 0.0)
+            ay = (bullet_trajs_params[i][5] if len(bullet_trajs_params[i]) > 1 else 0.0)
+            r = self._mem_bullets_rads[i][-1] if len(self._mem_bullets_rads[i]) > 0 else 10
+            self.debug_drawer.write_bullet_data(i, relx, rely, vx, vy, ax, ay, r)
+        return boss_traj, bullet_trajs
+
+    def _decide_step_0_maintain_memory(self, obs):
+        player_x = obs['player_x']
+        player_y = obs['player_y']
+        boss_from_player_x = obs['boss_from_player_x']
+        boss_from_player_y = obs['boss_from_player_y']
+        boss_velx = obs['boss_velx']
+        boss_vely = obs['boss_vely']
+        nearest_bullets = obs[
+            'nearest_bullets']  # shape (k,5) array of nearest enemy bullets, each row is (x, y(relative to player), vx, vy, radius)
+        # Store current player position for coordinate conversion
+        self._current_player_x = player_x
+        self._current_player_y = player_y
+        self._mem_boss_xs.append(boss_from_player_x)
+        self._mem_boss_ys.append(boss_from_player_y)
+        self._mem_boss_vxs.append(boss_velx)
+        self._mem_boss_vys.append(boss_vely)
+        for i in range(self.consider_bullets_num):
+            relx, rely, vx, vy, _r = nearest_bullets[i]
+            self._mem_bullets_xs[i].append(relx)
+            self._mem_bullets_ys[i].append(rely)
+            self._mem_bullets_vxs[i].append(vx)
+            self._mem_bullets_vys[i].append(vy)
+            self._mem_bullets_rads[i].append(_r)
+        self._bullets_waypoints_calced = False  # 新的一帧，子弹轨迹点需要重新计算
+        self._boss_waypoints_calced = False  # 新的一帧，boss轨迹点需要重新计算
+        return boss_from_player_x, boss_from_player_y, boss_velx, boss_vely, player_x, player_y
+
     # step 2 helper functions
     def _J_goal(self, target_pos: tuple[float, float], boss_traj: Callable[[int], tuple[float, float]], bullet_trajs: list[Callable[[int], tuple[float, float]]]) -> float:
         """Calculate the goal cost function J for a given target position.
@@ -370,7 +387,7 @@ class OptBrain(BaseBrain):
                 punishment: The calculated punishment cost.
             """
             gamma = 1.0
-            return gamma * np.max([0, -z]) ** 2  # quadratic punishment for being inside the danger zone
+            return gamma * (-z if z<0 else 0) ** 2  # quadratic punishment for being inside the danger zone
             
         # calc bullets and boss trajectories if not calculated
         if not self._bullets_waypoints_calced:
@@ -453,31 +470,22 @@ class OptBrain(BaseBrain):
         best_cost = float('inf')
         
         # Method 1: Local optimization starting from last target position
-        try:
-            result = minimize(objective_function, 
-                            x0=np.array(self._last_target_pos),
-                            bounds=bounds,
-                            method='L-BFGS-B',
-                            options={'maxiter': 50, 'ftol': 4.0})
-            if result.success and result.fun < best_cost:
-                best_cost = result.fun
-                best_pos = (result.x[0], result.x[1])
-        except Exception as e:
-            printyellow(f"Local optimization failed: {e}")
+        candidate_cost1, candidate_pos1 = self._opt_with_scipy_method1(best_cost, best_pos, bounds, objective_function)
         
         # Method 2: Try optimization starting from the middle point between current player position and last target position
-        try:
-            midpoint = (np.array([player_x, player_y]) + np.array(self._last_target_pos)) / 2
-            result = minimize(objective_function,
-                            x0=midpoint,
-                            bounds=bounds,
-                            method='L-BFGS-B',
-                            options={'maxiter': 30, 'ftol': 10.0})
-            if result.success and result.fun < best_cost:
-                best_cost = result.fun
-                best_pos = (result.x[0], result.x[1])
-        except Exception as e:
-            printyellow(f"Player position optimization failed: {e}")
+        candidate_cost2, candidate_pos2 = self._opt_with_scipy_method2(best_cost, best_pos, bounds, objective_function, player_x,
+                                                           player_y)
+
+        if candidate_cost1 < candidate_cost2:
+            best_pos = candidate_pos1
+            best_cost = candidate_cost1
+        elif candidate_cost2 <= candidate_cost1:
+            best_pos = candidate_pos2
+            best_cost = candidate_cost2
+        elif candidate_cost1 == candidate_cost2 == float('inf'):
+            printred(f'error: got infinite cost in step 2')
+        else:
+            raise ValueError(f'error: got strange costs: {candidate_cost1}, {candidate_cost2}')
         
         # Method 3: Global optimization (fallback for complex landscapes)
         if best_cost == float('inf'):
@@ -495,6 +503,35 @@ class OptBrain(BaseBrain):
                 best_pos = (Settings.window_width / 2, Settings.window_height * 3 / 4)
         
         return best_pos
+
+    def _opt_with_scipy_method2(self, best_cost, best_pos, bounds, objective_function, player_x, player_y):
+        try:
+            midpoint = (np.array([player_x, player_y]) + np.array(self._last_target_pos)) / 2
+            result = minimize(objective_function,
+                              x0=midpoint,
+                              bounds=bounds,
+                              method='L-BFGS-B',
+                              options={'maxiter': 30, 'ftol': 10.0})
+            if result.success and result.fun < best_cost:
+                best_cost = result.fun
+                best_pos = (result.x[0], result.x[1])
+        except Exception as e:
+            printyellow(f"Player position optimization failed: {e}")
+        return best_cost, best_pos
+
+    def _opt_with_scipy_method1(self, best_cost, best_pos, bounds, objective_function):
+        try:
+            result = minimize(objective_function,
+                              x0=np.array(self._last_target_pos),
+                              bounds=bounds,
+                              method='L-BFGS-B',
+                              options={'maxiter': 50, 'ftol': 4.0})
+            if result.success and result.fun < best_cost:
+                best_cost = result.fun
+                best_pos = (result.x[0], result.x[1])
+        except Exception as e:
+            printyellow(f"Local optimization failed: {e}")
+        return best_cost, best_pos
 
     def _optimize_with_grid_search(self, objective_function, bounds) -> tuple[float, float]:
         """Use grid search as a fallback optimization method when scipy is not available.
@@ -556,7 +593,7 @@ class OptBrain(BaseBrain):
     # step 3 helper functions
     def _get_action(self, idx: int) -> Action:
         return list(Action)[idx]
-    
+
     def _J_collision(self, action_seq: list[int]) -> float:
         """Calculate the precise collision cost J for a given player position.
 
@@ -568,7 +605,7 @@ class OptBrain(BaseBrain):
         # We think that bullets' waypoints have been calculated in step 2
         def phi(z: float) -> float:
             gamma = 1.0
-            return gamma * np.max((0, -z)) ** 3  # cubic punishment for being inside the danger zone
+            return gamma * max(0, -int(z)) ** 3  # cubic punishment for being inside the danger zone
         cost = 0.0
         player_pos = (self._current_player_x, self._current_player_y)
         SAFETY_THRESH = Settings.player_radius + 40
@@ -596,7 +633,7 @@ class OptBrain(BaseBrain):
             if out_of_bound:
                 cost = float('inf')
         return cost
-    
+
     def _J_action_togoal(self, action_seq: list[int]) -> float:
         """Calculate the precise cost J to encourage reaching the goal.
 
@@ -619,7 +656,7 @@ class OptBrain(BaseBrain):
         #     cost += -np.cos(np.dot(player_to_target_vec_unit, action_vec_unit)) + 1  # 希望action_vec和player_to_target_vec方向一致
         # cost += 0.03 * np.hypot(player_pos[0] - self._target_pos[0], player_pos[1] - self._target_pos[1])  # 希望最终位置接近目标位置
         return cost
-    
+
     def _J_action_smooth(self, action_seq: list[int]) -> float:
         """Calculate the smoothness cost J for a given action sequence.
 

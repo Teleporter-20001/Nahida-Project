@@ -1,5 +1,6 @@
 import cProfile
 import pstats
+from collections.abc import Callable
 from typing import cast
 
 from app.Agent.Brains.BaseBrain import BaseBrain
@@ -12,41 +13,55 @@ from app.env.GameTrainer import GameTrainer
 from app.env.TouhouEnv import TouhouEnv
 from app.common.utils import printred, printgreen
 
+
+def normal_play():
+    # global env, game
+    env = TouhouEnv(Settings)
+    game: Game = Game(env)
+    agent: BaseBrain = OptBrain(memory_len=6, predict_len=9, action_predict_len=9)
+    once_reward = game.run_episode(agent, max_steps=100000, render=True)
+    env._terminated = True
+    env.close()
+    del agent
+    print(f'reward in one game: {once_reward}')
+
+
+def train_model():
+    # global env, game
+    env = TouhouEnv(Settings)
+    trainer = DRQNTrainer(MemoryBrainV2(be_teached=Settings.teach_mode), Settings.consider_bullets_num)
+    game: GameTrainer = GameTrainer(env, trainer)
+    # game.optimize_network(1200001)
+    game.train(Settings.repeat_period + 1)
+    env.close()
+
+
+def profile_run(function: Callable[[], None]):
+    profiler = cProfile.Profile()
+    profiler.enable()
+    try:
+        function()
+    except KeyboardInterrupt:
+        printgreen('Process interrupted by user')
+    except Exception as e:
+        printred(f'Process ended with error: {e}')
+        raise
+    printgreen('-----------------------finish--------------------------')
+    profiler.disable()
+    stats = pstats.Stats(profiler).sort_stats('cumtime')
+    stats.print_stats(50)
+
+
 if __name__ == '__main__':
     play_mode: bool = True
+    performance_analyze = True
     if play_mode:
-        # settings = Settings()
-        env = TouhouEnv(Settings)
-        game: Game = Game(env)
-        agent: BaseBrain = OptBrain(memory_len=6, predict_len=9, action_predict_len=9)
-        once_reward = game.run_episode(agent, max_steps=100000, render=True)
-        env._terminated = True
-        env.close()
-        del agent
-        print(f'reward in one game: {once_reward}')
+        if performance_analyze:
+            profile_run(normal_play)
+        else:
+            normal_play()
     else:
-        performance_analyze = False
-        profiler: cProfile.Profile = cast(cProfile.Profile, None)
         if performance_analyze:
-            profiler = cProfile.Profile()
-            profiler.enable()
-
-        try:
-            # settings: Settings = Settings()
-            env = TouhouEnv(Settings)
-            trainer = DRQNTrainer(MemoryBrainV2(be_teached=Settings.teach_mode), Settings.consider_bullets_num)
-            game: GameTrainer = GameTrainer(env, trainer)
-            # game.optimize_network(1200001)
-            game.train(Settings.repeat_period + 1)
-            env.close()
-        except KeyboardInterrupt:
-            printgreen('Training interrupted by user')
-        except Exception as e:
-            printred(f'Training ended with error: {e}')
-            raise
-
-        printgreen('-----------------------finish--------------------------')
-        if performance_analyze:
-            profiler.disable()
-            stats = pstats.Stats(profiler).sort_stats('cumtime')
-            stats.print_stats(40)
+            profile_run(train_model)
+        else:
+            train_model()
