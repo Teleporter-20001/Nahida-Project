@@ -1,6 +1,7 @@
 torch
 pygame
 numpy
+numba
 matplotlib
 pandas
 PyQt5

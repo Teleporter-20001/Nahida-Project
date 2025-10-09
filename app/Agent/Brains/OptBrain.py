@@ -1,6 +1,7 @@
 from collections import deque
 from collections.abc import Callable
 
+import numba
 import numpy as np
 
 from app.characters.Nahida import Nahida
@@ -17,6 +18,195 @@ from app.Agent.Brains.OptUtils.OptDrawer import OptDrawer
 from app.Agent.DataStructure import State, Action
 from app.common.Settings import Settings
 from app.common.utils import printgreen, printred, printyellow, printblue
+
+
+# Static helper functions for numba.njit optimization with explicit types
+# Pre-computed action factors for better performance
+_ACTION_FACTORS = np.array([
+    [-0.707, -0.707],  # LEFTUP
+    [0.0, -1.0],       # UP
+    [0.707, -0.707],   # RIGHTUP
+    [-1.0, 0.0],       # LEFT
+    [0.0, 0.0],        # NOMOVE
+    [1.0, 0.0],        # RIGHT
+    [-0.707, 0.707],   # LEFTDOWN
+    [0.0, 1.0],        # DOWN
+    [0.707, 0.707]     # RIGHTDOWN
+], dtype=np.float64)
+
+@numba.njit(fastmath=True, cache=True)
+def _get_action_factors(action_idx: int) -> tuple[float, float]:
+    """Get xfactor and yfactor for a given action index.
+    
+    Args:
+        action_idx (int): Index of the action in Action enum (0-8)
+        
+    Returns:
+        tuple[float, float]: (xfactor, yfactor) for the action
+    """
+    # Bounds check for safety
+    if action_idx < 0 or action_idx >= 9:
+        return (0.0, 0.0)  # Default to NOMOVE
+    
+    # Direct array access is faster than if-elif chain
+    xfactor = _ACTION_FACTORS[action_idx, 0]
+    yfactor = _ACTION_FACTORS[action_idx, 1]
+    return (xfactor, yfactor)
+
+
+@numba.njit(fastmath=True, cache=True)
+def _J_collision_static(
+    action_seq,  # Accept both list and ndarray
+    current_player_x: float,
+    current_player_y: float,
+    bullets_waypoints: np.ndarray,  # shape: (consider_bullets_num, predict_len, 2)
+    boss_waypoints: np.ndarray,     # shape: (predict_len, 2)
+    consider_bullets_num: int,
+    bullets_rads: np.ndarray,       # shape: (consider_bullets_num,)
+    player_radius: float,
+    boss_radius: float,
+    nahida_speed: float,
+    fps: float,
+    player_img_width: float,
+    player_img_height: float,
+    window_width: float,
+    window_height: float
+) -> float:
+    """Calculate the precise collision cost J for a given player position.
+    
+    Optimized version with explicit types to reduce numba typeof overhead.
+    """
+    # Pre-compute constants
+    gamma = 1.0
+    safety_thresh = player_radius + 40.0
+    speed_factor = nahida_speed / fps
+    boss_safety_margin = player_radius + boss_radius + 150.0
+    
+    # Use explicit arrays instead of tuples for better performance
+    player_x = current_player_x
+    player_y = current_player_y
+    
+    cost = 0.0
+    action_seq_len = len(action_seq)
+    
+    for step in range(action_seq_len):
+        # Get action factors
+        action_idx = action_seq[step]
+        xfactor, yfactor = _get_action_factors(action_idx)
+        
+        # Update player position
+        player_x += xfactor * speed_factor
+        player_y += yfactor * speed_factor
+        
+        # Check bullets collision
+        for i in range(consider_bullets_num):
+            bullet_rel_x = bullets_waypoints[i, step, 0]
+            bullet_rel_y = bullets_waypoints[i, step, 1]
+            bullet_abs_x = current_player_x + bullet_rel_x
+            bullet_abs_y = current_player_y + bullet_rel_y
+            bullet_radius = bullets_rads[i]
+            
+            # Calculate distance and apply punishment
+            dx = bullet_abs_x - player_x
+            dy = bullet_abs_y - player_y
+            dist = np.sqrt(dx * dx + dy * dy)  # Faster than np.hypot
+            z = dist - safety_thresh - bullet_radius
+            
+            if z < 0.0:
+                cost += gamma * (-z) ** 3  # Inline phi function for performance
+            
+        # Check boss collision
+        boss_rel_x = boss_waypoints[step, 0]
+        boss_rel_y = boss_waypoints[step, 1]
+        boss_abs_x = current_player_x + boss_rel_x
+        boss_abs_y = current_player_y + boss_rel_y
+        
+        dx = boss_abs_x - player_x
+        dy = boss_abs_y - player_y
+        dist = np.sqrt(dx * dx + dy * dy)
+        z = dist - boss_safety_margin
+        
+        if z < 0.0:
+            cost += gamma * (-z) ** 3
+        
+        # Check bounds (early return for infinite cost)
+        if (player_x <= player_img_width * 0.5 or 
+            player_x >= window_width - player_img_width * 0.5 or
+            player_y <= player_img_height * 0.5 or 
+            player_y >= window_height - player_img_height * 0.5):
+            return float('inf')
+    
+    return cost
+
+
+@numba.njit(fastmath=True, cache=True)
+def _J_action_togoal_static(
+    action_seq,  # Accept both list and ndarray
+    current_player_x: float,
+    current_player_y: float,
+    target_pos_x: float,
+    target_pos_y: float,
+    nahida_speed: float,
+    fps: float
+) -> float:
+    """Calculate the precise cost J to encourage reaching the goal.
+    
+    Optimized version with explicit variables instead of tuples.
+    """
+    cost = 0.0
+    player_x = current_player_x
+    player_y = current_player_y
+    speed_factor = nahida_speed / fps
+    action_seq_len = len(action_seq)
+    
+    for step in range(action_seq_len):
+        action_idx = action_seq[step]
+        xfactor, yfactor = _get_action_factors(action_idx)
+        
+        # Update player position
+        player_x += xfactor * speed_factor
+        player_y += yfactor * speed_factor
+        
+        # Calculate squared distance (avoid sqrt for performance)
+        dx = target_pos_x - player_x
+        dy = target_pos_y - player_y
+        dist_squared = dx * dx + dy * dy
+        cost += dist_squared
+        
+    return cost
+
+
+@numba.njit(fastmath=True, cache=True)
+def _J_action_smooth_static(action_seq) -> float:
+    """Calculate the smoothness cost J for a given action sequence.
+    
+    Optimized version with pre-computed values and reduced function calls.
+    """
+    action_seq_len = len(action_seq)
+    if action_seq_len < 2:
+        return 0.0
+    
+    cost = 0.0
+    
+    for step in range(1, action_seq_len):
+        prev_action_idx = action_seq[step - 1]
+        curr_action_idx = action_seq[step]
+        
+        # Skip if either action is NOMOVE (index 4)
+        if prev_action_idx == 4 or curr_action_idx == 4:
+            continue
+        
+        prev_xfactor, prev_yfactor = _get_action_factors(prev_action_idx)
+        curr_xfactor, curr_yfactor = _get_action_factors(curr_action_idx)
+        
+        # Calculate angle difference efficiently
+        prev_angle = np.arctan2(prev_yfactor, prev_xfactor)
+        curr_angle = np.arctan2(curr_yfactor, curr_xfactor)
+        angle_diff = curr_angle - prev_angle
+        
+        cost += angle_diff * angle_diff  # More efficient than ** 2
+        
+    return cost
 
 
 def _predict_trajectory(xs: np.ndarray, ys: np.ndarray, vxs: np.ndarray, vys: np.ndarray) -> tuple[float, float, float, float, float, float, Callable[[int], tuple[float, float]]]:
@@ -602,37 +792,34 @@ class OptBrain(BaseBrain):
         Returns:
             cost: The calculated collision cost.
         """
-        # We think that bullets' waypoints have been calculated in step 2
-        def phi(z: float) -> float:
-            gamma = 1.0
-            return gamma * max(0, -int(z)) ** 3  # cubic punishment for being inside the danger zone
-        cost = 0.0
-        player_pos = (self._current_player_x, self._current_player_y)
-        SAFETY_THRESH = Settings.player_radius + 40
-        for step in range(len(action_seq)):
-            _action = self._get_action(action_seq[step])
-            player_pos = tuple(np.array(player_pos) + (np.array([_action.xfactor, _action.yfactor]) * Nahida.ORIGIN_SPEED / Settings.FPS))
-            # bullets
-            for i in range(self.consider_bullets_num):
-                bullet_rel_x, bullet_rel_y = self._bullets_waypoints[i, step, :]
-                bullet_abs_x, bullet_abs_y = self._current_player_x + bullet_rel_x, self._current_player_y + bullet_rel_y
-                bullet_radius = self._mem_bullets_rads[i][-1]
-                z = np.hypot(bullet_abs_x - player_pos[0], bullet_abs_y - player_pos[1]) - SAFETY_THRESH - bullet_radius
-                cost += phi(z)
-            # boss
-            boss_rel_x, boss_rel_y = self._boss_waypoints[step, :]
-            boss_abs_x, boss_abs_y = self._current_player_x + boss_rel_x, self._current_player_y + boss_rel_y
-            z = np.hypot(boss_abs_x - player_pos[0], boss_abs_y - player_pos[1]) - (Settings.player_radius + Settings.boss_radius + 150)
-            cost += phi(z)
-            # out of bound
-            px, py = player_pos
-            out_of_bound = px <= Settings.player_img_width/2 \
-                           or px >= Settings.window_width - Settings.player_img_width/2 \
-                            or py <= Settings.player_img_height/2 \
-                            or py >= Settings.window_height - Settings.player_img_height/2
-            if out_of_bound:
-                cost = float('inf')
-        return cost
+        # Prepare bullets_rads array for the static function
+        bullets_rads = np.zeros(self.consider_bullets_num, dtype=np.float32)
+        for i in range(self.consider_bullets_num):
+            if len(self._mem_bullets_rads[i]) > 0:
+                bullets_rads[i] = self._mem_bullets_rads[i][-1]
+            else:
+                bullets_rads[i] = 10.0  # Default radius
+        
+        # Convert list to numpy array for better performance
+        action_array = np.array(action_seq, dtype=np.int32)
+        
+        return _J_collision_static(
+            action_array,
+            float(self._current_player_x),
+            float(self._current_player_y),
+            self._bullets_waypoints,
+            self._boss_waypoints,
+            int(self.consider_bullets_num),
+            bullets_rads,
+            float(Settings.player_radius),
+            float(Settings.boss_radius),
+            float(Nahida.ORIGIN_SPEED),
+            float(Settings.FPS),
+            float(Settings.player_img_width),
+            float(Settings.player_img_height),
+            float(Settings.window_width),
+            float(Settings.window_height)
+        )
 
     def _J_action_togoal(self, action_seq: list[int]) -> float:
         """Calculate the precise cost J to encourage reaching the goal.
@@ -643,19 +830,18 @@ class OptBrain(BaseBrain):
         Returns:
             float: The calculated cost to reach the goal.
         """
-        cost = 0.0
-        player_pos = (self._current_player_x, self._current_player_y)
-        # player_to_target_vec = np.array(self._target_pos) - np.array(player_pos)
-        # player_to_target_vec_unit = player_to_target_vec / (np.linalg.norm(player_to_target_vec) + 1e-3)
-        for step in range(len(action_seq)):
-            _action = self._get_action(action_seq[step])
-            player_pos = tuple(np.array(player_pos) + (np.array([_action.xfactor, _action.yfactor]) * Nahida.ORIGIN_SPEED / Settings.FPS))
-            cost += np.hypot(self._target_pos[0] - player_pos[0], self._target_pos[1] - player_pos[1]) ** 2  # 希望每一步都接近目标位置
-        #     action_vec = np.array([_action.xfactor, _action.yfactor])
-        #     action_vec_unit = action_vec / (np.linalg.norm(action_vec) + 1e-3) if _action != Action.NOMOVE else np.dot(np.array([[np.cos(np.pi/2), np.sin(np.pi/2)], [-np.sin(np.pi/2), np.cos(np.pi/2)]]), player_to_target_vec_unit)
-        #     cost += -np.cos(np.dot(player_to_target_vec_unit, action_vec_unit)) + 1  # 希望action_vec和player_to_target_vec方向一致
-        # cost += 0.03 * np.hypot(player_pos[0] - self._target_pos[0], player_pos[1] - self._target_pos[1])  # 希望最终位置接近目标位置
-        return cost
+        # Convert list to numpy array for better performance
+        action_array = np.array(action_seq, dtype=np.int32)
+        
+        return _J_action_togoal_static(
+            action_array,
+            float(self._current_player_x),
+            float(self._current_player_y),
+            float(self._target_pos[0]),
+            float(self._target_pos[1]),
+            float(Nahida.ORIGIN_SPEED),
+            float(Settings.FPS)
+        )
 
     def _J_action_smooth(self, action_seq: list[int]) -> float:
         """Calculate the smoothness cost J for a given action sequence.
@@ -665,16 +851,9 @@ class OptBrain(BaseBrain):
         Returns:
             cost: The calculated smoothness cost.
         """
-        cost = 0.0
-        if len(action_seq) < 2:
-            return cost
-        for step in range(1, len(action_seq)):
-            prev_action = self._get_action(action_seq[step - 1])
-            curr_action = self._get_action(action_seq[step])
-            if prev_action == Action.NOMOVE or curr_action == Action.NOMOVE:
-                continue
-            cost += (np.arctan2(curr_action.yfactor, curr_action.xfactor) - np.arctan2(prev_action.yfactor, prev_action.xfactor)) ** 2
-        return cost
+        # Convert list to numpy array for better performance
+        action_array = np.array(action_seq, dtype=np.int32)
+        return _J_action_smooth_static(action_array)
 
     def _beam_search_action_sequence(self, weight_collision: float = 1.0, weight_togoal: float = 0.5, weight_smooth: float = 0.1) -> list[int]:
         """Use Beam Search to find the optimal action sequence for step 3.
@@ -701,6 +880,7 @@ class OptBrain(BaseBrain):
                 return total_cost
             except Exception as e:
                 # 如果计算失败，返回一个很大的惩罚值
+                printred(f'Exception occurred while calculating the combined cost for action seq {action_seq[:min(len(action_seq), 4)]}: {e}')
                 return float('inf')
 
         # Beam Search实现
@@ -714,7 +894,8 @@ class OptBrain(BaseBrain):
                 cost = combined_cost([action_idx])
                 if cost < float('inf'):
                     current_beams.append(([action_idx], cost))
-            except Exception:
+            except Exception as e:
+                printred(f'An exception occurred while calculating the cost for action {action_idx}: {e}')
                 continue
         
         # 如果第一层就没有有效的动作，返回默认动作序列

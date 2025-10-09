@@ -20,13 +20,18 @@ class Settings:
     """
 
     # default values
-    FPS: int = 30
+    FPS: int = 60
     window_width: int = 600
     window_height: int = 800
     window_background_color: pygame.color.Color = pygame.Color(80, 160, 150)
-    save_record: bool = True
+    save_record: bool = False
 
     consider_bullets_num: int = 10
+    
+    # debug settings
+    enable_debug_drawer: bool = True  # Set to True to enable OptBrain debug window
+    debug_drawer_fps_limit: int = 40   # Limit debug window FPS to reduce overhead
+    debug_data_compression: bool = True  # Enable data compression for debug transmission
     
     # player params
     player_img_width: int = 80
