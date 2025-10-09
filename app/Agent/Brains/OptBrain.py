@@ -97,6 +97,9 @@ def _J_collision_static(
         # Update player position
         player_x += xfactor * speed_factor
         player_y += yfactor * speed_factor
+        if player_x < player_img_width/2 or player_x > window_width - player_img_width/2 or player_y < player_img_height/2 or player_y > window_height - player_img_height/2:
+            # think it is out of bound
+            return float('inf')
         
         # Check bullets collision
         for i in range(consider_bullets_num):
@@ -171,7 +174,10 @@ def _J_action_togoal_static(
         dx = target_pos_x - player_x
         dy = target_pos_y - player_y
         dist_squared = dx * dx + dy * dy
-        cost += dist_squared
+        if dist_squared <= 10000:
+            cost += dist_squared
+        else:
+            cost += 100 * np.sqrt(dist_squared)
         
     return cost
 
@@ -209,6 +215,105 @@ def _J_action_smooth_static(action_seq) -> float:
     return cost
 
 
+@numba.njit(fastmath=True, cache=True)
+def _J_goal_static(
+    target_pos_x: float,
+    target_pos_y: float,
+    boss_target_x: float,
+    boss_target_y: float,
+    player_img_width: float,
+    window_width: float,
+    player_img_height: float,
+    window_height: float,
+    boss_radius: float
+) -> float:
+    """Static Numba-optimized version of _J_goal."""
+    is_out_of_bound = not (
+        player_img_width / 2 <= target_pos_x <= window_width - player_img_width / 2 and
+        player_img_height / 2 <= target_pos_y <= window_height - player_img_height / 2
+    )
+    if is_out_of_bound:
+        return float('inf')
+
+    prefer_target_x = boss_target_x
+    prefer_target_y = max(window_height * 3. / 4, min(boss_target_y + window_height * 0.4, window_height - player_img_height))
+    
+    weight_x, weight_y = 1.0, 0.8
+    cost = weight_x * np.abs(prefer_target_x - target_pos_x) ** 2 + weight_y * np.abs(prefer_target_y - target_pos_y) ** 2
+    if cost > 100000:
+        cost = cost * cost
+    return cost
+
+
+@numba.njit(fastmath=True, cache=True)
+def _J_collision_rough_static(
+    target_pos_x: float,
+    target_pos_y: float,
+    bullets_waypoints: np.ndarray,
+    boss_waypoints: np.ndarray,
+    current_player_x: float,
+    current_player_y: float,
+    bullets_rads: np.ndarray,
+    player_radius: float,
+    boss_radius: float,
+    rough_collision_weights: np.ndarray,
+    consider_bullets_num: int,
+    predict_len: int
+) -> float:
+    """Static Numba-optimized version of _J_collision_rough."""
+    cost = 0.0
+    gamma = 1.0
+    
+    # Bullets collision
+    for i in range(consider_bullets_num):
+        bullet_radius = bullets_rads[i]
+        safety_margin = player_radius + bullet_radius + 15.0
+        for step in range(predict_len):
+            bullet_rel_x, bullet_rel_y = bullets_waypoints[i, step, 0], bullets_waypoints[i, step, 1]
+            bullet_abs_x = current_player_x + bullet_rel_x
+            bullet_abs_y = current_player_y + bullet_rel_y
+            
+            dist_to_bullet = np.sqrt((bullet_abs_x - target_pos_x)**2 + (bullet_abs_y - target_pos_y)**2)
+            z = dist_to_bullet - safety_margin
+            
+            if z < 0:
+                cost += rough_collision_weights[step] * gamma * (-z) ** 2
+    
+    # Boss collision
+    boss_safety_margin = player_radius + boss_radius + 150.0
+    for step in range(predict_len):
+        boss_rel_x, boss_rel_y = boss_waypoints[step, 0], boss_waypoints[step, 1]
+        boss_abs_x = current_player_x + boss_rel_x
+        boss_abs_y = current_player_y + boss_rel_y
+        
+        dist_to_boss = np.sqrt((boss_abs_x - target_pos_x)**2 + (boss_abs_y - target_pos_y)**2)
+        z = dist_to_boss - boss_safety_margin
+        
+        if z < 0:
+            cost += rough_collision_weights[step] * gamma * (-z) ** 2
+            
+    return cost
+
+
+@numba.njit(fastmath=True, cache=True)
+def _J_smooth_static(
+    target_pos_x: float,
+    target_pos_y: float,
+    last_target_pos_x: float,
+    last_target_pos_y: float,
+    fps: float
+) -> float:
+    """Static Numba-optimized version of _J_smooth."""
+    gamma = 1.0
+    threshold = 180.0 / fps
+    dist = np.sqrt((target_pos_x - last_target_pos_x)**2 + (target_pos_y - last_target_pos_y)**2)
+    z = dist - threshold
+    
+    if z > 0:
+        return gamma * z ** 2
+    return 0.0
+
+
 def _predict_trajectory(xs: np.ndarray, ys: np.ndarray, vxs: np.ndarray, vys: np.ndarray) -> tuple[float, float, float, float, float, float, Callable[[int], tuple[float, float]]]:
     """
     输入历史N帧的观测数据（左边的数据较早），计算现在的加速度，返回所有轨迹参数。
@@ -225,7 +330,7 @@ def _predict_trajectory(xs: np.ndarray, ys: np.ndarray, vxs: np.ndarray, vys: np
     # assert datalen >= 2, f'not enough data to predict acc: {datalen} < 2'
     if datalen < 2:
         # printyellow(f'not enough data to predict acc: {datalen} < 2')
-        return 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, lambda step: (0.0, 0.0)
+        return xs[-1], ys[-1], vxs[-1], vys[-1], 0.0, 0.0, lambda step: (xs[-1] + vxs[-1] * step / Settings.FPS, ys[-1] + vys[-1] * step / Settings.FPS)
     
     # 尝试对子弹突变进行检查并截断
     MAX_SPEED = 500.0  # 每帧最大速度，超过这个速度就认为是突变
@@ -244,10 +349,10 @@ def _predict_trajectory(xs: np.ndarray, ys: np.ndarray, vxs: np.ndarray, vys: np
         ax = (vxs[-1] - vxs[-2]) / dt
         ay = (vys[-1] - vys[-2]) / dt
     elif datalen < 2:
-        # 刚刚发生突变，干脆用上一次的结果，反正延迟一帧也无所谓
+        # 刚刚发生突变，也干脆认为它是匀速运动的，不要撞上去
         # printyellow(f'not enough data to predict acc after truncation: {datalen} < 2')
 
-        return 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, lambda step: (0.0, 0.0)
+        return xs[-1], ys[-1], vxs[-1], vys[-1], 0.0, 0.0, lambda step: (xs[-1] + vxs[-1] * step / Settings.FPS, ys[-1] + vys[-1] * step / Settings.FPS)
     else:
         dt = 1.0 / Settings.FPS
         times = np.arange(-datalen * dt, (-1+1) * dt, step=dt, dtype=np.float32)
@@ -289,6 +394,8 @@ def _predict_trajectory(xs: np.ndarray, ys: np.ndarray, vxs: np.ndarray, vys: np
 
 class OptBrain(BaseBrain):
 
+    ACTION_LIST = list(Action)
+
     def __init__(self, memory_len: int = 10, predict_len: int = 10, action_predict_len: int = 10, consider_bullets_num: int = 10, be_teached: bool = False):
         """Initialize the OptBrain.
 
@@ -329,6 +436,7 @@ class OptBrain(BaseBrain):
         self._rough_collision_weights: np.ndarray = np.ones(self.predict_len)  # 指数的权重，用于粗略碰撞检测的加权
         self._last_target_pos: tuple[float, float] = (Settings.window_width / 2, Settings.window_height * 3 / 4)  # 上一帧的目标位置，初始为屏幕中央偏下
         self._target_pos: tuple[float, float] = self._last_target_pos  # 当前帧的目标位置，初始为上一帧的位置
+        self._prefer_pos: tuple[float, float] = self._last_target_pos  # 期望的目标位置
         
         # for step 3
         self.beam_width = 9  # Beam search的beam宽度
@@ -358,7 +466,11 @@ class OptBrain(BaseBrain):
 
         # -------------------------------------------------------------------------
         # opt step 2: decide the best target position to go to
-        weight_prefer, weight_collision, weight_smooth = 8, 200, 0.5
+        
+        # Pre-calculate prefer_pos once per frame
+        self._calculate_prefer_pos(boss_traj)
+        
+        weight_prefer, weight_collision, weight_smooth = 0.01, 20, 0.1
         
         # Define the combined objective function
         def objective_function_step2(pos):
@@ -528,57 +640,33 @@ class OptBrain(BaseBrain):
         self._boss_waypoints_calced = False  # 新的一帧，boss轨迹点需要重新计算
         return boss_from_player_x, boss_from_player_y, boss_velx, boss_vely, player_x, player_y
 
+    def _calculate_prefer_pos(self, boss_traj: Callable[[int], tuple[float, float]]):
+        """Pre-calculate the preferred target position for the current frame."""
+        boss_target_x, boss_target_y = boss_traj(min(6, self.action_predict_len)) if boss_traj is not None else (0.0, 0.0)
+        boss_target_x += self._current_player_x
+        boss_target_y += self._current_player_y
+        
+        prefer_target_x = boss_target_x
+        prefer_target_y = max(Settings.window_height * 3. / 4, min(boss_target_y + Settings.window_height * 0.4, Settings.window_height - Settings.boss_radius))
+        self._prefer_pos = (prefer_target_x, prefer_target_y)
+
     # step 2 helper functions
     def _J_goal(self, target_pos: tuple[float, float], boss_traj: Callable[[int], tuple[float, float]], bullet_trajs: list[Callable[[int], tuple[float, float]]]) -> float:
-        """Calculate the goal cost function J for a given target position.
-
-        Args:
-            target_pos (tuple[float, float]): The target position (x, y) to evaluate (absolute coordinates).
-            boss_traj (Callable[[int], tuple[float, float]]): The predicted trajectory function of the boss (returns relative coordinates).
-            bullet_trajs (list[Callable[[int], tuple[float, float]]]): The list of predicted trajectory functions of the bullets.
-
-        Returns:
-            float: The calculated goal cost.
-        """
-        is_out_of_bound = not (Settings.player_img_width / 2 <= target_pos[0] <= Settings.window_width - Settings.player_img_width / 2 and Settings.player_img_height / 2 <= target_pos[1] <= Settings.window_height - Settings.player_img_height / 2)
-        if is_out_of_bound:
-            return float('inf')  # out of bound is not allowed
-
-        # Calculate the boss target after action_predict_len frames
-        boss_target_x, boss_target_y = boss_traj(min(6, self.action_predict_len)) if boss_traj is not None else (0.0, 0.0)
-        boss_target_x += self._current_player_x  # convert to absolute coordinates
-        boss_target_y += self._current_player_y  # convert to absolute coordinates
-
-        prefer_target_x = boss_target_x
-        prefer_target_y = max(Settings.window_height * 3. / 4, min(boss_target_y + Settings.window_height * 0.4, Settings.window_height - Settings.boss_radius))  # prefer to stay below the boss
-        
-        weight_x, weight_y = 1, 0.8  # x方向的权重较大，y方向的权重较小，表示希望靠近boss的水平位置但保持一定的垂直距离
-        cost = weight_x * np.abs(prefer_target_x - target_pos[0]) + weight_y * np.abs(prefer_target_y - target_pos[1])
-        return cost
+        """Calculate the goal cost function J for a given target position. (Numba-optimized)"""
+        return _J_goal_static(
+            target_pos[0],
+            target_pos[1],
+            self._prefer_pos[0],
+            self._prefer_pos[1],
+            Settings.player_img_width,
+            Settings.window_width,
+            Settings.player_img_height,
+            Settings.window_height,
+            Settings.boss_radius
+        )
     
     def _J_collision_rough(self, target_pos: tuple[float, float], boss_traj: Callable[[int], tuple[float, float]], bullet_trajs: list[Callable[[int], tuple[float, float]]]) -> float:
-        """Calculate the rough collision cost J for a given target position.
-
-        Args:
-            target_pos (tuple[float, float]): The target position (x, y) to evaluate.
-            boss_traj (Callable[[int], tuple[float, float]]): The predicted trajectory function of the boss.
-            bullet_trajs (list[Callable[[int], tuple[float, float]]]): The list of predicted trajectory functions of the bullets.
-
-        Returns:
-            float: The calculated collision cost.
-        """
-        def phi(z: float) -> float:
-            """Punishment function for collision cost.
-
-            Args:
-                z (float): The distance to the danger zone.
-
-            Returns:
-                punishment: The calculated punishment cost.
-            """
-            gamma = 1.0
-            return gamma * (-z if z<0 else 0) ** 2  # quadratic punishment for being inside the danger zone
-            
+        """Calculate the rough collision cost J for a given target position. (Numba-optimized)"""
         # calc bullets and boss trajectories if not calculated
         if not self._bullets_waypoints_calced:
             for i in range(self.consider_bullets_num):
@@ -595,54 +683,39 @@ class OptBrain(BaseBrain):
             else:
                 self._boss_waypoints[:, :] = 0.0
             self._boss_waypoints_calced = True
-        
-        # Rough collision detection: check if the target position is within the danger zone of any bullets
-        cost = 0.0
-        for i in range(self.consider_bullets_num):
-            for step in range(self.predict_len):
-                # bullet_waypoints contains relative positions, convert to absolute
-                bullet_rel_x, bullet_rel_y = self._bullets_waypoints[i, step, :]
-                bullet_abs_x = self._current_player_x + bullet_rel_x
-                bullet_abs_y = self._current_player_y + bullet_rel_y
-                bullet_radius = self._mem_bullets_rads[i][-1]
-                dist_to_bullet = np.hypot(bullet_abs_x - target_pos[0], bullet_abs_y - target_pos[1])
-                z = dist_to_bullet - (Settings.player_radius + bullet_radius + 30)
-                cost += self._rough_collision_weights[step] * phi(z)
-                
-        for step in range(self.predict_len):
-            # boss_waypoints contains relative positions, convert to absolute
-            boss_rel_x, boss_rel_y = self._boss_waypoints[step, :]
-            boss_abs_x = self._current_player_x + boss_rel_x
-            boss_abs_y = self._current_player_y + boss_rel_y
-            
-            dist_to_boss = np.hypot(boss_abs_x - target_pos[0], boss_abs_y - target_pos[1])
-            z = dist_to_boss - (Settings.player_radius + Settings.boss_radius + 50)  # 留一点余量
-            cost += self._rough_collision_weights[step] * phi(z)
 
-        return cost
+        # Prepare bullets_rads array for the static function
+        bullets_rads = np.zeros(self.consider_bullets_num, dtype=np.float32)
+        for i in range(self.consider_bullets_num):
+            if len(self._mem_bullets_rads[i]) > 0:
+                bullets_rads[i] = self._mem_bullets_rads[i][-1]
+            else:
+                bullets_rads[i] = 10.0  # Default radius
+
+        return _J_collision_rough_static(
+            target_pos[0],
+            target_pos[1],
+            self._bullets_waypoints,
+            self._boss_waypoints,
+            self._current_player_x,
+            self._current_player_y,
+            bullets_rads,
+            Settings.player_radius,
+            Settings.boss_radius,
+            self._rough_collision_weights,
+            self.consider_bullets_num,
+            self.predict_len
+        )
     
     def _J_smooth(self, target_pos: tuple[float, float], last_target_pos: tuple[float, float]) -> float:
-        """Calculate the smoothness cost J for a given target position.
-
-        Args:
-            target_pos (tuple[float, float]): The current target position (x, y) to evaluate.
-            last_target_pos (tuple[float, float]): The last target position (x, y) from the previous frame.
-
-        Returns:
-            float: The calculated smoothness cost.
-        """
-        def phi(z: float) -> float:
-            """Punishment function for smoothness cost.
-
-            Args:
-                z (float): The distance between current and last target positions.
-            Returns:
-                punishment: The calculated punishment cost.
-            """
-            gamma = 1.0
-            return gamma * max(0, int(z)) ** 2  # quadratic punishment for large changes in target position
-        THRESHOLD =180 / Settings.FPS
-        return phi(np.hypot(target_pos[0] - last_target_pos[0], target_pos[1] - last_target_pos[1]) - THRESHOLD)
+        """Calculate the smoothness cost J for a given target position. (Numba-optimized)"""
+        return _J_smooth_static(
+            target_pos[0],
+            target_pos[1],
+            last_target_pos[0],
+            last_target_pos[1],
+            Settings.FPS
+        )
 
     def _optimize_with_scipy(self, objective_function, bounds, player_x: float, player_y: float) -> tuple[float, float]:
         """Use scipy optimization methods to find the best target position.
@@ -782,7 +855,7 @@ class OptBrain(BaseBrain):
 
     # step 3 helper functions
     def _get_action(self, idx: int) -> Action:
-        return list(Action)[idx]
+        return self.ACTION_LIST[idx]
 
     def _J_collision(self, action_seq: list[int]) -> float:
         """Calculate the precise collision cost J for a given player position.
