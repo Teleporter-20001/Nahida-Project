@@ -9,3 +9,6 @@ pytest
 tqdm
 scipy
 opencv-python
+dxcam
+pywin32
+psutil
